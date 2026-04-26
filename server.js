@@ -1864,6 +1864,7 @@ app.get('/api/radar/stats', authMiddleware, async (req, res) => {
 
     res.json({
       recent: recent || [],
+      liveScores: radar ? radar.getLiveScores() : [],
       stats: {
         scannedToday: scannedToday || 0,
         blockedToday: blockedToday || 0

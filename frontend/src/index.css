@@ -843,6 +843,51 @@ button.danger:hover:not(:disabled) {
   overflow: auto;
 }
 
+.terminal-log.radar-score-console {
+  height: 360px;
+  min-height: 360px;
+  max-height: 360px;
+  overflow: auto;
+}
+
+.radar-score-table {
+  min-width: 1040px;
+  width: 100%;
+}
+
+.radar-score-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: rgba(6, 8, 12, 0.96);
+}
+
+.radar-score-table th,
+.radar-score-table td {
+  padding: 8px 10px;
+  white-space: nowrap;
+}
+
+.radar-score-table td:last-child {
+  white-space: normal;
+  min-width: 260px;
+  color: var(--text-soft);
+}
+
+.radar-score-row.success {
+  border-left: 3px solid var(--success-green);
+}
+
+.radar-score-row.warning {
+  border-left: 3px solid var(--warn-amber);
+  background: rgba(245, 158, 11, 0.05);
+}
+
+.radar-score-row.danger {
+  border-left: 3px solid var(--danger-red);
+  background: rgba(239, 68, 68, 0.07);
+}
+
 .terminal-log::before {
   content: '';
   position: absolute;
