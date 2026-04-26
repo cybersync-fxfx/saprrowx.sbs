@@ -46,6 +46,7 @@ export function TelemetryProvider({ token, children }) {
     connections: 0, bannedIPs: 0, cpuPercent: 0,
     memPercent: 0, synRate: 0, pps: 0, uptime: 0,
     inMbps: 0, outMbps: 0, udpConns: 0,
+    avgPacketBytes: 0,
     hostname: '-', ip: '-', os: '-', iface: '-',
   });
 
@@ -53,6 +54,7 @@ export function TelemetryProvider({ token, children }) {
   const [netHistory,  setNetHistory]  = useState(saved?.netHistory  ?? { inb: emptyArr(), out: emptyArr() });
   const [connHistory, setConnHistory] = useState(saved?.connHistory ?? { tcp: emptyArr(), udp: emptyArr() });
   const [logs,        setLogs]        = useState(saved?.logs ?? []);
+  const [trafficEvents, setTrafficEvents] = useState(saved?.trafficEvents ?? []);
   const [lastUpdateMs, setLastUpdateMs] = useState(saved?.lastUpdateMs ?? null);
 
   // ── Persist to localStorage whenever key state changes ────────────────────
@@ -61,6 +63,7 @@ export function TelemetryProvider({ token, children }) {
   const netHistRef    = useRef(netHistory);
   const connHistRef   = useRef(connHistory);
   const logsRef       = useRef(logs);
+  const trafficEventsRef = useRef(trafficEvents);
   const lastUpdateRef = useRef(lastUpdateMs);
   const agentStatRef  = useRef(agentStatus);
 
@@ -70,6 +73,7 @@ export function TelemetryProvider({ token, children }) {
   useEffect(() => { netHistRef.current = netHistory; }, [netHistory]);
   useEffect(() => { connHistRef.current = connHistory; }, [connHistory]);
   useEffect(() => { logsRef.current = logs; }, [logs]);
+  useEffect(() => { trafficEventsRef.current = trafficEvents; }, [trafficEvents]);
   useEffect(() => { lastUpdateRef.current = lastUpdateMs; }, [lastUpdateMs]);
   useEffect(() => { agentStatRef.current = agentStatus; }, [agentStatus]);
 
@@ -84,6 +88,7 @@ export function TelemetryProvider({ token, children }) {
         netHistory:   netHistRef.current,
         connHistory:  connHistRef.current,
         logs:         logsRef.current.slice(0, 200),
+        trafficEvents: trafficEventsRef.current.slice(0, 200),
         lastUpdateMs: lastUpdateRef.current,
         agentStatus:  agentStatRef.current,
       });
@@ -91,7 +96,7 @@ export function TelemetryProvider({ token, children }) {
   }, []);
 
   // Save whenever any piece of state updates
-  useEffect(() => { scheduleSave(); }, [stats, cpuHistory, netHistory, logs, scheduleSave]);
+  useEffect(() => { scheduleSave(); }, [stats, cpuHistory, netHistory, logs, trafficEvents, scheduleSave]);
 
   // ── WebSocket management ─────────────────────────────────────────────────
   const wsRef       = useRef(null);
@@ -114,6 +119,7 @@ export function TelemetryProvider({ token, children }) {
       memPercent:  s.memPercent   ?? prev.memPercent,
       synRate:     s.synRate      ?? prev.synRate,
       pps:         s.pps          ?? prev.pps,
+      avgPacketBytes: s.avgPacketBytes ?? prev.avgPacketBytes,
       uptime:      s.uptime       ?? prev.uptime,
       inMbps:      s.inMbps       ?? prev.inMbps,
       outMbps:     s.outMbps      ?? prev.outMbps,
@@ -152,6 +158,80 @@ export function TelemetryProvider({ token, children }) {
         return { text: `[${new Date().toLocaleTimeString()}] ${l}`, level };
       });
       setLogs(prev => [...lines, ...prev].slice(0, 500));
+    }
+
+    const incomingFallbackBytes = Math.round(Number(s.inMbps || 0) * 1_000_000 / 8);
+    const outgoingFallbackBytes = Math.round(Number(s.outMbps || 0) * 1_000_000 / 8);
+    const fallbackEvents = [
+      {
+        timestamp: new Date().toISOString(),
+        direction: 'incoming',
+        protocol: 'IFACE',
+        sourceLabel: 'network',
+        destinationLabel: s.iface || 'agent',
+        state: incomingFallbackBytes > 0 ? 'RX' : 'IDLE',
+        packets: Number(s.pps || 0) > 0 ? Math.round(Number(s.pps || 0) / 2) : 0,
+        sizeBytes: incomingFallbackBytes,
+        avgPacketBytes: Number(s.avgPacketBytes || 0),
+        rateMbps: Number(s.inMbps || 0),
+        iface: s.iface || '-',
+        severity: Number(s.inMbps || 0) >= 10 ? 'warning' : 'success',
+        reason: incomingFallbackBytes > 0 ? 'incoming normal traffic' : 'incoming idle',
+      },
+      {
+        timestamp: new Date().toISOString(),
+        direction: 'outgoing',
+        protocol: 'IFACE',
+        sourceLabel: s.iface || 'agent',
+        destinationLabel: 'network',
+        state: outgoingFallbackBytes > 0 ? 'TX' : 'IDLE',
+        packets: Number(s.pps || 0) > 0 ? Math.floor(Number(s.pps || 0) / 2) : 0,
+        sizeBytes: outgoingFallbackBytes,
+        avgPacketBytes: Number(s.avgPacketBytes || 0),
+        rateMbps: Number(s.outMbps || 0),
+        iface: s.iface || '-',
+        severity: Number(s.outMbps || 0) >= 10 ? 'warning' : 'success',
+        reason: outgoingFallbackBytes > 0 ? 'outgoing normal traffic' : 'outgoing idle',
+      },
+    ];
+
+    const trafficPayload = Array.isArray(s.trafficEvents) && s.trafficEvents.length > 0
+      ? s.trafficEvents
+      : fallbackEvents;
+
+    if (trafficPayload.length > 0) {
+      const normalized = trafficPayload.map((event, index) => ({
+        id: [
+          event.timestamp || Date.now(),
+          event.protocol || 'IP',
+          event.direction || 'flow',
+          event.localIp || '-',
+          event.localPort || '-',
+          event.remoteIp || '-',
+          event.remotePort || '-',
+          index,
+        ].join(':'),
+        timestamp: event.timestamp || new Date().toISOString(),
+        direction: event.direction || 'flow',
+        protocol: event.protocol || 'IP',
+        localIp: event.localIp || '-',
+        localPort: event.localPort ?? '-',
+        remoteIp: event.remoteIp || '-',
+        remotePort: event.remotePort ?? '-',
+        sourceLabel: event.sourceLabel || '',
+        destinationLabel: event.destinationLabel || '',
+        state: event.state || '-',
+        recvQ: Number(event.recvQ || 0),
+        sendQ: Number(event.sendQ || 0),
+        packets: event.packets === null || event.packets === undefined ? null : Number(event.packets || 0),
+        sizeBytes: Number(event.sizeBytes || 0),
+        avgPacketBytes: Number(event.avgPacketBytes || 0),
+        rateMbps: Number(event.rateMbps || 0),
+        iface: event.iface || s.iface || '-',
+        severity: event.severity || 'success',
+        reason: event.reason || 'normal flow',
+      }));
+      setTrafficEvents(prev => [...normalized, ...prev].slice(0, 240));
     }
   }, []);
 
@@ -293,6 +373,7 @@ export function TelemetryProvider({ token, children }) {
     netHistory,
     connHistory,
     logs,
+    trafficEvents,
     lastUpdateMs,
     sendCommand,
     isConnected: agentStatus === 'CONNECTED',

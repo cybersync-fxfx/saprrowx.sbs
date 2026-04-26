@@ -3,7 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const { getTunnelStateDir, listTunnelConfigs } = require('./tunnel-config');
 
-const DEFAULT_SCAN_INTERVAL_MS = Number(process.env.SBS_RADAR_SCAN_INTERVAL_MS || 10000);
+const DEFAULT_SCAN_INTERVAL_MS = Number(process.env.SBS_RADAR_SCAN_INTERVAL_MS || 1000);
 const DEFAULT_CONFIG = {
   enabled: process.env.SBS_RADAR_ENABLED !== '0',
   autoBan: process.env.SBS_RADAR_AUTO_BAN !== '0',
@@ -82,10 +82,12 @@ function toBoolean(value, fallback) {
   return fallback;
 }
 
-function toInteger(value, fallback, min = 0) {
+function toInteger(value, fallback, min = 0, max = Number.MAX_SAFE_INTEGER) {
   const next = Number(value);
   if (!Number.isFinite(next)) return fallback;
-  return Math.max(min, Math.round(next));
+  const rounded = Math.round(next);
+  if (rounded > max) return fallback;
+  return Math.max(min, rounded);
 }
 
 function toFloat(value, fallback, min = 0, max = 1) {
@@ -115,6 +117,7 @@ class RadarScanner {
     this.isScanning = false;
     this.timer = null;
     this.observations = new Map();
+    this.latestScores = [];
     this.lastScanAt = null;
     this.lastSummary = {
       scannedIps: 0,
@@ -150,10 +153,10 @@ class RadarScanner {
 
   normalizeConfig(raw = {}) {
     return {
-      enabled: toBoolean(raw.enabled, DEFAULT_CONFIG.enabled),
-      autoBan: toBoolean(raw.autoBan, DEFAULT_CONFIG.autoBan),
-      threshold: toInteger(raw.threshold, DEFAULT_CONFIG.threshold, 1),
-      watchThreshold: toInteger(raw.watchThreshold, DEFAULT_CONFIG.watchThreshold, 1),
+      enabled: DEFAULT_CONFIG.enabled,
+      autoBan: DEFAULT_CONFIG.autoBan,
+      threshold: toInteger(raw.threshold, DEFAULT_CONFIG.threshold, 1, 100),
+      watchThreshold: toInteger(raw.watchThreshold, DEFAULT_CONFIG.watchThreshold, 1, 100),
       connWarn: toInteger(raw.connWarn, DEFAULT_CONFIG.connWarn, 1),
       connBan: toInteger(raw.connBan, DEFAULT_CONFIG.connBan, 1),
       synWarn: toInteger(raw.synWarn, DEFAULT_CONFIG.synWarn, 1),
@@ -166,7 +169,7 @@ class RadarScanner {
       burstBan: toInteger(raw.burstBan, DEFAULT_CONFIG.burstBan, 1),
       portFanoutWarn: toInteger(raw.portFanoutWarn, DEFAULT_CONFIG.portFanoutWarn, 1),
       portFanoutBan: toInteger(raw.portFanoutBan, DEFAULT_CONFIG.portFanoutBan, 1),
-      scanIntervalMs: toInteger(raw.scanIntervalMs, DEFAULT_CONFIG.scanIntervalMs, 1000),
+      scanIntervalMs: DEFAULT_CONFIG.scanIntervalMs,
       banCooldownMs: toInteger(raw.banCooldownMs, DEFAULT_CONFIG.banCooldownMs, 1000),
       logCooldownMs: toInteger(raw.logCooldownMs, DEFAULT_CONFIG.logCooldownMs, 1000),
       ignoredLocalPorts: Array.isArray(raw.ignoredLocalPorts)
@@ -205,7 +208,12 @@ class RadarScanner {
       isScanning: this.isScanning,
       lastScanAt: this.lastScanAt,
       summary: this.lastSummary,
+      liveScores: this.getLiveScores(),
     };
+  }
+
+  getLiveScores() {
+    return this.latestScores.slice(0, 120);
   }
 
   start() {
@@ -387,6 +395,7 @@ class RadarScanner {
       let cleanIps = 0;
       let lastBannedIp = null;
       let lastReason = '';
+      const liveScores = [];
 
       for (const [ip, metrics] of snapshot.entries()) {
         if (this.shouldIgnore(ip, metrics)) continue;
@@ -430,6 +439,24 @@ class RadarScanner {
           await this.logThreat(ip, result, action, metrics);
         }
 
+        liveScores.push({
+          id: `${nowIso}-${ip}`,
+          ip,
+          score: Math.min(100, result.score),
+          rawScore: result.score,
+          action,
+          reason: result.reasons.join(', ') || 'normal activity',
+          detected_at: nowIso,
+          tcp: metrics.tcp,
+          syn: metrics.syn,
+          established: metrics.established,
+          udp: metrics.udp,
+          ports: metrics.localPorts.size,
+          delta: result.delta,
+          synRatio: Number(result.synRatio.toFixed(3)),
+          totalConnections: result.totalConnections,
+        });
+
         this.observations.set(ip, {
           totalConnections: result.totalConnections,
           lastScore: result.score,
@@ -441,6 +468,9 @@ class RadarScanner {
       }
 
       this.lastScanAt = new Date().toISOString();
+      this.latestScores = liveScores
+        .sort((a, b) => b.score - a.score || b.totalConnections - a.totalConnections)
+        .slice(0, 120);
       this.lastSummary = {
         scannedIps,
         watchedIps,

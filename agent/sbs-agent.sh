@@ -39,7 +39,7 @@ const fs   = require('fs');
 const os   = require('os');
 const http = require('http');
 const https = require('https');
-const { exec } = require('child_process');
+const { exec, execSync } = require('child_process');
 
 // ── Helpers ───────────────────────────────────────────────────
 function getCpuUsage() {
@@ -142,13 +142,189 @@ function register() {
 }
 
 // ── Network bytes ─────────────────────────────────────────────
-let lastNet = { rx:0, tx:0, ts:Date.now() };
+let lastNet = { rx:0, tx:0, rxPackets:0, txPackets:0, ts:Date.now() };
+let cachedPrimaryIface = '';
+
+function getPrimaryInterface() {
+  if (cachedPrimaryIface) return cachedPrimaryIface;
+  try {
+    cachedPrimaryIface = execSync("ip -o -4 route show to default 2>/dev/null | awk '{print $5; exit}'", {
+      encoding:'utf8',
+      timeout:800,
+      stdio:['ignore','pipe','ignore']
+    }).trim();
+  } catch(e) {
+    cachedPrimaryIface = '';
+  }
+  return cachedPrimaryIface;
+}
+
 function readNetBytes(cb) {
-  exec("cat /proc/net/dev | awk 'NR>2 && !/lo/ {print $1,$2,$10; exit}'", (e,out)=>{
+  const iface = String(getPrimaryInterface() || '').replace(/[^A-Za-z0-9_.:-]/g, '');
+  const cmd = iface
+    ? "awk -v want='" + iface + "' 'NR>2 {name=$1; gsub(\":\",\"\",name); if(name==want){print name,$2,$3,$10,$11; exit}}' /proc/net/dev"
+    : "awk 'NR>2 && $1 !~ /^lo:/ {print $1,$2,$3,$10,$11; exit}' /proc/net/dev";
+  exec(cmd, (e,out)=>{
+    if((!out||!out.trim())&&iface) {
+      cachedPrimaryIface = '';
+      return readNetBytes(cb);
+    }
     if(e||!out.trim()) return cb(null,{rx:0,tx:0,iface:'unknown'});
     const p=out.trim().split(/\s+/);
-    cb(null,{iface:(p[0]||'').replace(':',''),rx:parseInt(p[1])||0,tx:parseInt(p[2])||0});
+    cb(null,{
+      iface:(p[0]||'').replace(':',''),
+      rx:parseInt(p[1])||0,
+      rxPackets:parseInt(p[2])||0,
+      tx:parseInt(p[3])||0,
+      txPackets:parseInt(p[4])||0
+    });
   });
+}
+
+function parseEndpoint(value) {
+  const raw = String(value || '').replace(/,.*/, '').trim();
+  if (!raw || raw === '*:*' || raw === '0.0.0.0:*' || raw === '[::]:*') return null;
+  let host = raw;
+  let port = '';
+  if (raw[0] === '[') {
+    const end = raw.lastIndexOf(']:');
+    if (end === -1) return null;
+    host = raw.slice(1, end);
+    port = raw.slice(end + 2);
+  } else {
+    const idx = raw.lastIndexOf(':');
+    if (idx === -1) return null;
+    host = raw.slice(0, idx);
+    port = raw.slice(idx + 1);
+  }
+  host = host.replace(/%.*$/, '');
+  if (!host || host === '*' || host === '::' || host === '0.0.0.0') return null;
+  const portNumber = Number(port);
+  return { ip: host, port: Number.isFinite(portNumber) ? portNumber : null };
+}
+
+function isServicePort(port) {
+  return [20,21,22,25,53,80,110,143,443,465,587,993,995,3000,3001,51820].includes(Number(port));
+}
+
+function classifyDirection(local, remote) {
+  if (!local || !remote) return 'listen';
+  if (isServicePort(local.port) && !isServicePort(remote.port)) return 'incoming';
+  if (!isServicePort(local.port) && isServicePort(remote.port)) return 'outgoing';
+  if (Number(local.port) < 1024 && Number(remote.port) >= 1024) return 'incoming';
+  if (Number(remote.port) < 1024 && Number(local.port) >= 1024) return 'outgoing';
+  return 'incoming';
+}
+
+function classifyTrafficSeverity(event) {
+  const riskyPorts = [23,135,139,445,1433,3306,3389,5432,5900,6379,9200,11211];
+  if (/SYN-RECV/i.test(event.state) || (event.direction === 'incoming' && riskyPorts.includes(Number(event.localPort)))) {
+    return { severity:'danger', reason:'suspicious inbound service probe' };
+  }
+  if (event.sizeBytes >= 65536 || /CLOSE-WAIT|LAST-ACK/i.test(event.state)) {
+    return { severity:'warning', reason:'large queued packet data' };
+  }
+  if (event.direction === 'incoming' && !isServicePort(event.localPort)) {
+    return { severity:'warning', reason:'inbound non-standard port' };
+  }
+  return { severity:'success', reason:'normal flow' };
+}
+
+function interfaceSeverity(direction, mbps, packets) {
+  if (mbps >= 50 || packets >= 5000) return { severity:'danger', reason:direction+' flood-rate traffic' };
+  if (mbps >= 10 || packets >= 1000) return { severity:'warning', reason:direction+' elevated traffic' };
+  if (packets > 0) return { severity:'success', reason:direction+' normal traffic' };
+  return { severity:'success', reason:direction+' idle' };
+}
+
+function buildInterfaceTrafficEvents(netNow, rxDiff, txDiff, rxPacketDiff, txPacketDiff, inMbps, outMbps, avgPacketBytes) {
+  const now = new Date().toISOString();
+  const iface = netNow.iface || 'unknown';
+  const incoming = {
+    timestamp:now,
+    direction:'incoming',
+    protocol:'IFACE',
+    sourceLabel:'network',
+    destinationLabel:iface,
+    localIp:iface,
+    localPort:null,
+    remoteIp:'network',
+    remotePort:null,
+    state:rxPacketDiff>0?'RX':'IDLE',
+    recvQ:0,
+    sendQ:0,
+    packets:rxPacketDiff,
+    sizeBytes:rxDiff,
+    avgPacketBytes,
+    rateMbps:inMbps,
+    iface,
+    ...interfaceSeverity('incoming', inMbps, rxPacketDiff)
+  };
+  const outgoing = {
+    timestamp:now,
+    direction:'outgoing',
+    protocol:'IFACE',
+    sourceLabel:iface,
+    destinationLabel:'network',
+    localIp:iface,
+    localPort:null,
+    remoteIp:'network',
+    remotePort:null,
+    state:txPacketDiff>0?'TX':'IDLE',
+    recvQ:0,
+    sendQ:0,
+    packets:txPacketDiff,
+    sizeBytes:txDiff,
+    avgPacketBytes,
+    rateMbps:outMbps,
+    iface,
+    ...interfaceSeverity('outgoing', outMbps, txPacketDiff)
+  };
+  return [incoming, outgoing];
+}
+
+function collectTrafficEvents(iface) {
+  try {
+    const output = execSync('ss -Htuna 2>/dev/null | head -n 80', {
+      encoding:'utf8',
+      timeout:1200,
+      stdio:['ignore','pipe','ignore']
+    });
+    const now = new Date().toISOString();
+    return output.split('\n').map(l=>l.trim()).filter(Boolean).map(line=>{
+      const parts=line.split(/\s+/);
+      if(parts.length<6) return null;
+      const protocol=String(parts[0]||'').toUpperCase();
+      if(protocol!=='TCP'&&protocol!=='UDP') return null;
+      const state=parts[1]||'-';
+      const recvQ=parseInt(parts[2])||0;
+      const sendQ=parseInt(parts[3])||0;
+      const local=parseEndpoint(parts[4]);
+      const remote=parseEndpoint(parts[5]);
+      if(!local||!remote) return null;
+      const direction=classifyDirection(local,remote);
+      const base={
+        timestamp:now,
+        direction,
+        protocol,
+        localIp:local.ip,
+        localPort:local.port,
+        remoteIp:remote.ip,
+        remotePort:remote.port,
+        state,
+        recvQ,
+        sendQ,
+        packets:null,
+        sizeBytes:recvQ+sendQ,
+        avgPacketBytes:0,
+        rateMbps:0,
+        iface:iface||'unknown'
+      };
+      return { ...base, ...classifyTrafficSeverity(base) };
+    }).filter(Boolean).slice(0,30);
+  } catch(e) {
+    return [];
+  }
 }
 
 // ── Stats ─────────────────────────────────────────────────────
@@ -157,9 +333,18 @@ function sendStats() {
     const elapsed=(Date.now()-lastNet.ts)/1000||1;
     const rxDiff=Math.max(0,netNow.rx-lastNet.rx);
     const txDiff=Math.max(0,netNow.tx-lastNet.tx);
+    const rxPacketDiff=Math.max(0,(netNow.rxPackets||0)-(lastNet.rxPackets||0));
+    const txPacketDiff=Math.max(0,(netNow.txPackets||0)-(lastNet.txPackets||0));
+    const packetDiff=rxPacketDiff+txPacketDiff;
     const inMbps=parseFloat(((rxDiff*8)/elapsed/1e6).toFixed(3));
     const outMbps=parseFloat(((txDiff*8)/elapsed/1e6).toFixed(3));
-    lastNet={rx:netNow.rx,tx:netNow.tx,ts:Date.now()};
+    const pps=parseFloat((packetDiff/elapsed).toFixed(1));
+    const avgPacketBytes=packetDiff>0?Math.round((rxDiff+txDiff)/packetDiff):0;
+    lastNet={rx:netNow.rx,tx:netNow.tx,rxPackets:netNow.rxPackets||0,txPackets:netNow.txPackets||0,ts:Date.now()};
+    const trafficEvents=[
+      ...buildInterfaceTrafficEvents(netNow,rxDiff,txDiff,rxPacketDiff,txPacketDiff,inMbps,outMbps,avgPacketBytes),
+      ...collectTrafficEvents(netNow.iface),
+    ];
 
     exec(
       "ss -ant | wc -l; " +
@@ -212,11 +397,13 @@ function sendStats() {
           bannedIPs:   parseInt(lines[3])||0,
           cpuPercent:  parseFloat(cpuPct.toFixed(1))||0,
           memPercent:  parseFloat(lines[4])||0,
-          inMbps, outMbps, pps:0,
+          inMbps, outMbps, pps,
+          avgPacketBytes,
           uptime:      parseFloat(lines[5])||0,
           udpConns:    parseInt(lines[6])||0,
           log:         logOutput,
           iface:       netNow.iface,
+          trafficEvents,
           tunnelName,
           tunnelPresent,
         });

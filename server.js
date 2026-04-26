@@ -88,18 +88,11 @@ let commandLedger = {}; // { cmdId: { agentId, kind, status, output, ... } }
 let radar = null;
 
 const ipv4Pattern = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/;
-const escapeTemplateLiteral = (value) => String(value)
-  .replace(/\\/g, '\\\\')
-  .replace(/`/g, '\\`')
-  .replace(/\$\{/g, '\\${');
+const CLIENT_TUNNEL_SCRIPT_SOURCE = fs
+  .readFileSync(path.join(__dirname, 'agent', 'setup-tunnel-client.sh'), 'utf8')
+  .replace(/\r\n/g, '\n');
 
-const CLIENT_TUNNEL_SCRIPT_SOURCE = escapeTemplateLiteral(
-  fs
-    .readFileSync(path.join(__dirname, 'agent', 'setup-tunnel-client.sh'), 'utf8')
-    .replace(/\r\n/g, '\n')
-);
-
-const CLIENT_TUNNEL_SERVICE_UNIT = escapeTemplateLiteral(`[Unit]
+const CLIENT_TUNNEL_SERVICE_UNIT = `[Unit]
 Description=SBS Client WireGuard Tunnel
 After=network-online.target
 Wants=network-online.target
@@ -115,7 +108,7 @@ StandardError=append:/var/log/sbs/agent.log
 
 [Install]
 WantedBy=multi-user.target
-`.replace(/\r\n/g, '\n'));
+`.replace(/\r\n/g, '\n');
 
 const normalizeIp = (value) => {
   if (!value) return '';
@@ -715,7 +708,7 @@ fi
 mkdir -p /opt/sbs-agent
 cat << 'AGENT_JS_EOF' > /opt/sbs-agent/agent.js
 const fs = require('fs');
-const { exec } = require('child_process');
+const { exec, execSync } = require('child_process');
 const http = require('http');
 const https = require('https');
 const os = require('os');
@@ -833,20 +826,210 @@ function register() {
 }
 
 // Read /proc/net/dev and return {rx, tx} bytes for the primary interface
+let cachedPrimaryIface = '';
+
+function getPrimaryInterface() {
+  if (cachedPrimaryIface) return cachedPrimaryIface;
+  try {
+    cachedPrimaryIface = execSync("ip -o -4 route show to default 2>/dev/null | awk '{print $5; exit}'", {
+      encoding: 'utf8',
+      timeout: 800,
+      stdio: ['ignore', 'pipe', 'ignore']
+    }).trim();
+  } catch (_) {
+    cachedPrimaryIface = '';
+  }
+  return cachedPrimaryIface;
+}
+
 function readNetBytes(cb) {
   const { exec } = require('child_process');
-  exec("cat /proc/net/dev | awk 'NR>2 && !/lo/ {print $1,$2,$10; exit}'", (err, out) => {
+  const iface = String(getPrimaryInterface() || '').replace(/[^A-Za-z0-9_.:-]/g, '');
+  const cmd = iface
+    ? "awk -v want='" + iface + "' 'NR>2 {name=$1; gsub(\":\",\"\",name); if(name==want){print name,$2,$3,$10,$11; exit}}' /proc/net/dev"
+    : "awk 'NR>2 && $1 !~ /^lo:/ {print $1,$2,$3,$10,$11; exit}' /proc/net/dev";
+
+  exec(cmd, (err, out) => {
+    if ((!out || !out.trim()) && iface) {
+      cachedPrimaryIface = '';
+      return readNetBytes(cb);
+    }
     if (err || !out.trim()) return cb(null, { rx: 0, tx: 0, iface: 'unknown' });
     const parts = out.trim().split(/\s+/);
     cb(null, {
       iface: (parts[0] || '').replace(':', ''),
       rx: parseInt(parts[1]) || 0,
-      tx: parseInt(parts[2]) || 0
+      rxPackets: parseInt(parts[2]) || 0,
+      tx: parseInt(parts[3]) || 0,
+      txPackets: parseInt(parts[4]) || 0
     });
   });
 }
 
-let lastNetSample = { rx: 0, tx: 0, ts: Date.now() };
+let lastNetSample = { rx: 0, tx: 0, rxPackets: 0, txPackets: 0, ts: Date.now() };
+
+function parseEndpoint(value) {
+  const raw = String(value || '').replace(/,.*/, '').trim();
+  if (!raw || raw === '*:*' || raw === '0.0.0.0:*' || raw === '[::]:*') return null;
+
+  let host = raw;
+  let port = '';
+  if (raw[0] === '[') {
+    const end = raw.lastIndexOf(']:');
+    if (end === -1) return null;
+    host = raw.slice(1, end);
+    port = raw.slice(end + 2);
+  } else {
+    const idx = raw.lastIndexOf(':');
+    if (idx === -1) return null;
+    host = raw.slice(0, idx);
+    port = raw.slice(idx + 1);
+  }
+
+  host = host.replace(/%.*$/, '');
+  if (!host || host === '*' || host === '::' || host === '0.0.0.0') return null;
+  const portNumber = Number(port);
+  return {
+    ip: host,
+    port: Number.isFinite(portNumber) ? portNumber : null
+  };
+}
+
+function isServicePort(port) {
+  return [20, 21, 22, 25, 53, 80, 110, 143, 443, 465, 587, 993, 995, 3000, 3001, 51820].includes(Number(port));
+}
+
+function classifyDirection(local, remote) {
+  if (!local || !remote) return 'listen';
+  if (isServicePort(local.port) && !isServicePort(remote.port)) return 'incoming';
+  if (!isServicePort(local.port) && isServicePort(remote.port)) return 'outgoing';
+  if (Number(local.port) < 1024 && Number(remote.port) >= 1024) return 'incoming';
+  if (Number(remote.port) < 1024 && Number(local.port) >= 1024) return 'outgoing';
+  return 'incoming';
+}
+
+function classifyTrafficSeverity(event) {
+  const riskyPorts = [23, 135, 139, 445, 1433, 3306, 3389, 5432, 5900, 6379, 9200, 11211];
+  if (/SYN-RECV/i.test(event.state) || (event.direction === 'incoming' && riskyPorts.includes(Number(event.localPort)))) {
+    return { severity: 'danger', reason: 'suspicious inbound service probe' };
+  }
+  if (event.sizeBytes >= 65536 || /CLOSE-WAIT|LAST-ACK/i.test(event.state)) {
+    return { severity: 'warning', reason: 'large queued packet data' };
+  }
+  if (event.direction === 'incoming' && !isServicePort(event.localPort)) {
+    return { severity: 'warning', reason: 'inbound non-standard port' };
+  }
+  return { severity: 'success', reason: 'normal flow' };
+}
+
+function interfaceSeverity(direction, mbps, packets) {
+  if (mbps >= 50 || packets >= 5000) {
+    return { severity: 'danger', reason: direction + ' flood-rate traffic' };
+  }
+  if (mbps >= 10 || packets >= 1000) {
+    return { severity: 'warning', reason: direction + ' elevated traffic' };
+  }
+  if (packets > 0) {
+    return { severity: 'success', reason: direction + ' normal traffic' };
+  }
+  return { severity: 'success', reason: direction + ' idle' };
+}
+
+function buildInterfaceTrafficEvents(netNow, rxDiff, txDiff, rxPacketDiff, txPacketDiff, inMbps, outMbps, avgPacketBytes) {
+  const now = new Date().toISOString();
+  const iface = netNow.iface || 'unknown';
+  const incoming = {
+    timestamp: now,
+    direction: 'incoming',
+    protocol: 'IFACE',
+    sourceLabel: 'network',
+    destinationLabel: iface,
+    localIp: iface,
+    localPort: null,
+    remoteIp: 'network',
+    remotePort: null,
+    state: rxPacketDiff > 0 ? 'RX' : 'IDLE',
+    recvQ: 0,
+    sendQ: 0,
+    packets: rxPacketDiff,
+    sizeBytes: rxDiff,
+    avgPacketBytes,
+    rateMbps: inMbps,
+    iface,
+    ...interfaceSeverity('incoming', inMbps, rxPacketDiff)
+  };
+  const outgoing = {
+    timestamp: now,
+    direction: 'outgoing',
+    protocol: 'IFACE',
+    sourceLabel: iface,
+    destinationLabel: 'network',
+    localIp: iface,
+    localPort: null,
+    remoteIp: 'network',
+    remotePort: null,
+    state: txPacketDiff > 0 ? 'TX' : 'IDLE',
+    recvQ: 0,
+    sendQ: 0,
+    packets: txPacketDiff,
+    sizeBytes: txDiff,
+    avgPacketBytes,
+    rateMbps: outMbps,
+    iface,
+    ...interfaceSeverity('outgoing', outMbps, txPacketDiff)
+  };
+  return [incoming, outgoing];
+}
+
+function collectTrafficEvents(iface) {
+  try {
+    const output = execSync('ss -Htuna 2>/dev/null | head -n 80', {
+      encoding: 'utf8',
+      timeout: 1200,
+      stdio: ['ignore', 'pipe', 'ignore']
+    });
+    const now = new Date().toISOString();
+    return output
+      .split('\\n')
+      .map(line => line.trim())
+      .filter(Boolean)
+      .map((line) => {
+        const parts = line.split(/\s+/);
+        if (parts.length < 6) return null;
+        const protocol = String(parts[0] || '').toUpperCase();
+        if (protocol !== 'TCP' && protocol !== 'UDP') return null;
+        const state = parts[1] || '-';
+        const recvQ = parseInt(parts[2]) || 0;
+        const sendQ = parseInt(parts[3]) || 0;
+        const local = parseEndpoint(parts[4]);
+        const remote = parseEndpoint(parts[5]);
+        if (!local || !remote) return null;
+        const direction = classifyDirection(local, remote);
+        const base = {
+          timestamp: now,
+          direction,
+          protocol,
+          localIp: local.ip,
+          localPort: local.port,
+          remoteIp: remote.ip,
+          remotePort: remote.port,
+          state,
+          recvQ,
+          sendQ,
+          packets: null,
+          sizeBytes: recvQ + sendQ,
+          avgPacketBytes: 0,
+          rateMbps: 0,
+          iface: iface || 'unknown'
+        };
+        return { ...base, ...classifyTrafficSeverity(base) };
+      })
+      .filter(Boolean)
+      .slice(0, 30);
+  } catch (_) {
+    return [];
+  }
+}
 
 function sendStats() {
   // Step 1: snapshot network bytes NOW before running the bash block
@@ -854,9 +1037,18 @@ function sendStats() {
     const elapsed = (Date.now() - lastNetSample.ts) / 1000 || 1;
     const rxDiff  = Math.max(0, netNow.rx - lastNetSample.rx);
     const txDiff  = Math.max(0, netNow.tx - lastNetSample.tx);
+    const rxPacketDiff = Math.max(0, (netNow.rxPackets || 0) - (lastNetSample.rxPackets || 0));
+    const txPacketDiff = Math.max(0, (netNow.txPackets || 0) - (lastNetSample.txPackets || 0));
+    const packetDiff = rxPacketDiff + txPacketDiff;
     const inMbps  = parseFloat(((rxDiff * 8) / elapsed / 1_000_000).toFixed(3));
     const outMbps = parseFloat(((txDiff * 8) / elapsed / 1_000_000).toFixed(3));
-    lastNetSample = { rx: netNow.rx, tx: netNow.tx, ts: Date.now() };
+    const pps = parseFloat((packetDiff / elapsed).toFixed(1));
+    const avgPacketBytes = packetDiff > 0 ? Math.round((rxDiff + txDiff) / packetDiff) : 0;
+    lastNetSample = { rx: netNow.rx, tx: netNow.tx, rxPackets: netNow.rxPackets || 0, txPackets: netNow.txPackets || 0, ts: Date.now() };
+    const trafficEvents = [
+      ...buildInterfaceTrafficEvents(netNow, rxDiff, txDiff, rxPacketDiff, txPacketDiff, inMbps, outMbps, avgPacketBytes),
+      ...collectTrafficEvents(netNow.iface),
+    ];
 
     // Step 2: collect system stats + SSH log + attack log
     exec(
@@ -917,11 +1109,13 @@ function sendStats() {
           memPercent:  parseFloat(lines[4]) || 0,
           inMbps,
           outMbps,
-          pps:   0,
+          pps,
+          avgPacketBytes,
           uptime: parseFloat(lines[5]) || 0,
           udpConns: parseInt(lines[6]) || 0,
           log:   logOutput,
           iface: netNow.iface,
+          trafficEvents,
           tunnelName,
           tunnelPresent,
         });
@@ -1034,7 +1228,12 @@ sed -i 's/\r$//' /opt/sbs-agent/agent.js /opt/sbs-agent/.env /opt/sbs-agent/setu
 systemctl daemon-reload
 systemctl enable sbs-agent
 systemctl restart sbs-agent
-systemctl disable sbs-tunnel 2>/dev/null || true
+if [ -f /opt/sbs-agent/tunnel.env ]; then
+  systemctl enable sbs-tunnel 2>/dev/null || true
+  systemctl restart sbs-tunnel 2>/dev/null || true
+else
+  systemctl disable sbs-tunnel 2>/dev/null || true
+fi
 
 echo "=============================================="
 echo "  SBS Agent installation complete! ✓"
@@ -1437,8 +1636,7 @@ app.delete('/api/agent/tunnel/remove', authMiddleware, privilegedSupabaseMiddlew
 
       const syncMismatch =
         (systemState.exists && !clientTunnelPresent) ||
-        (!systemState.exists && clientTunnelPresent) ||
-        (dbStatus === 'inactive' && (systemState.exists || clientTunnelPresent));
+        (!systemState.exists && clientTunnelPresent);
 
       let detail = 'No tunnel interfaces detected.';
       if (systemState.exists && clientTunnelPresent) {
@@ -1685,6 +1883,7 @@ app.get('/api/radar/stats', authMiddleware, async (req, res) => {
 
     res.json({
       recent: recent || [],
+      liveScores: radar ? radar.getLiveScores() : [],
       stats: {
         scannedToday: scannedToday || 0,
         blockedToday: blockedToday || 0
