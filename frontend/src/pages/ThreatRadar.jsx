@@ -72,7 +72,7 @@ export default function ThreatRadar({ token }) {
   useEffect(() => {
     if (!token) return;
     fetchStats();
-    const id = setInterval(fetchStats, 10000);
+    const id = setInterval(fetchStats, 3000);
     return () => clearInterval(id);
   }, [token]);
 

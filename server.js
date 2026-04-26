@@ -806,9 +806,34 @@ function register() {
 }
 
 // Read /proc/net/dev and return {rx, tx} bytes for the primary interface
+let cachedPrimaryIface = '';
+
+function getPrimaryInterface() {
+  if (cachedPrimaryIface) return cachedPrimaryIface;
+  try {
+    cachedPrimaryIface = execSync("ip -o -4 route show to default 2>/dev/null | awk '{print $5; exit}'", {
+      encoding: 'utf8',
+      timeout: 800,
+      stdio: ['ignore', 'pipe', 'ignore']
+    }).trim();
+  } catch (_) {
+    cachedPrimaryIface = '';
+  }
+  return cachedPrimaryIface;
+}
+
 function readNetBytes(cb) {
   const { exec } = require('child_process');
-  exec("cat /proc/net/dev | awk 'NR>2 && !/lo/ {print $1,$2,$3,$10,$11; exit}'", (err, out) => {
+  const iface = String(getPrimaryInterface() || '').replace(/[^A-Za-z0-9_.:-]/g, '');
+  const cmd = iface
+    ? "awk -v want='" + iface + "' 'NR>2 {name=$1; gsub(\":\",\"\",name); if(name==want){print name,$2,$3,$10,$11; exit}}' /proc/net/dev"
+    : "awk 'NR>2 && $1 !~ /^lo:/ {print $1,$2,$3,$10,$11; exit}' /proc/net/dev";
+
+  exec(cmd, (err, out) => {
+    if ((!out || !out.trim()) && iface) {
+      cachedPrimaryIface = '';
+      return readNetBytes(cb);
+    }
     if (err || !out.trim()) return cb(null, { rx: 0, tx: 0, iface: 'unknown' });
     const parts = out.trim().split(/\s+/);
     cb(null, {
@@ -877,6 +902,65 @@ function classifyTrafficSeverity(event) {
   return { severity: 'success', reason: 'normal flow' };
 }
 
+function interfaceSeverity(direction, mbps, packets) {
+  if (mbps >= 50 || packets >= 5000) {
+    return { severity: 'danger', reason: direction + ' flood-rate traffic' };
+  }
+  if (mbps >= 10 || packets >= 1000) {
+    return { severity: 'warning', reason: direction + ' elevated traffic' };
+  }
+  if (packets > 0) {
+    return { severity: 'success', reason: direction + ' normal traffic' };
+  }
+  return { severity: 'success', reason: direction + ' idle' };
+}
+
+function buildInterfaceTrafficEvents(netNow, rxDiff, txDiff, rxPacketDiff, txPacketDiff, inMbps, outMbps, avgPacketBytes) {
+  const now = new Date().toISOString();
+  const iface = netNow.iface || 'unknown';
+  const incoming = {
+    timestamp: now,
+    direction: 'incoming',
+    protocol: 'IFACE',
+    sourceLabel: 'network',
+    destinationLabel: iface,
+    localIp: iface,
+    localPort: null,
+    remoteIp: 'network',
+    remotePort: null,
+    state: rxPacketDiff > 0 ? 'RX' : 'IDLE',
+    recvQ: 0,
+    sendQ: 0,
+    packets: rxPacketDiff,
+    sizeBytes: rxDiff,
+    avgPacketBytes,
+    rateMbps: inMbps,
+    iface,
+    ...interfaceSeverity('incoming', inMbps, rxPacketDiff)
+  };
+  const outgoing = {
+    timestamp: now,
+    direction: 'outgoing',
+    protocol: 'IFACE',
+    sourceLabel: iface,
+    destinationLabel: 'network',
+    localIp: iface,
+    localPort: null,
+    remoteIp: 'network',
+    remotePort: null,
+    state: txPacketDiff > 0 ? 'TX' : 'IDLE',
+    recvQ: 0,
+    sendQ: 0,
+    packets: txPacketDiff,
+    sizeBytes: txDiff,
+    avgPacketBytes,
+    rateMbps: outMbps,
+    iface,
+    ...interfaceSeverity('outgoing', outMbps, txPacketDiff)
+  };
+  return [incoming, outgoing];
+}
+
 function collectTrafficEvents(iface) {
   try {
     const output = execSync('ss -Htuna 2>/dev/null | head -n 80', {
@@ -912,7 +996,10 @@ function collectTrafficEvents(iface) {
           state,
           recvQ,
           sendQ,
+          packets: null,
           sizeBytes: recvQ + sendQ,
+          avgPacketBytes: 0,
+          rateMbps: 0,
           iface: iface || 'unknown'
         };
         return { ...base, ...classifyTrafficSeverity(base) };
@@ -938,7 +1025,10 @@ function sendStats() {
     const pps = parseFloat((packetDiff / elapsed).toFixed(1));
     const avgPacketBytes = packetDiff > 0 ? Math.round((rxDiff + txDiff) / packetDiff) : 0;
     lastNetSample = { rx: netNow.rx, tx: netNow.tx, rxPackets: netNow.rxPackets || 0, txPackets: netNow.txPackets || 0, ts: Date.now() };
-    const trafficEvents = collectTrafficEvents(netNow.iface);
+    const trafficEvents = [
+      ...buildInterfaceTrafficEvents(netNow, rxDiff, txDiff, rxPacketDiff, txPacketDiff, inMbps, outMbps, avgPacketBytes),
+      ...collectTrafficEvents(netNow.iface),
+    ];
 
     // Step 2: collect system stats + SSH log + attack log
     exec(
@@ -1527,8 +1617,7 @@ app.delete('/api/agent/tunnel/remove', authMiddleware, privilegedSupabaseMiddlew
 
       const syncMismatch =
         (systemState.exists && !clientTunnelPresent) ||
-        (!systemState.exists && clientTunnelPresent) ||
-        (dbStatus === 'inactive' && (systemState.exists || clientTunnelPresent));
+        (!systemState.exists && clientTunnelPresent);
 
       let detail = 'No tunnel interfaces detected.';
       if (systemState.exists && clientTunnelPresent) {

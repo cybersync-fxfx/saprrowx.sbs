@@ -667,7 +667,7 @@ button.danger:hover:not(:disabled) {
 }
 
 .traffic-table {
-  min-width: 940px;
+  min-width: 1080px;
 }
 
 .traffic-table th {

@@ -82,10 +82,12 @@ function toBoolean(value, fallback) {
   return fallback;
 }
 
-function toInteger(value, fallback, min = 0) {
+function toInteger(value, fallback, min = 0, max = Number.MAX_SAFE_INTEGER) {
   const next = Number(value);
   if (!Number.isFinite(next)) return fallback;
-  return Math.max(min, Math.round(next));
+  const rounded = Math.round(next);
+  if (rounded > max) return fallback;
+  return Math.max(min, rounded);
 }
 
 function toFloat(value, fallback, min = 0, max = 1) {
@@ -152,8 +154,8 @@ class RadarScanner {
     return {
       enabled: toBoolean(raw.enabled, DEFAULT_CONFIG.enabled),
       autoBan: toBoolean(raw.autoBan, DEFAULT_CONFIG.autoBan),
-      threshold: toInteger(raw.threshold, DEFAULT_CONFIG.threshold, 1),
-      watchThreshold: toInteger(raw.watchThreshold, DEFAULT_CONFIG.watchThreshold, 1),
+      threshold: toInteger(raw.threshold, DEFAULT_CONFIG.threshold, 1, 100),
+      watchThreshold: toInteger(raw.watchThreshold, DEFAULT_CONFIG.watchThreshold, 1, 100),
       connWarn: toInteger(raw.connWarn, DEFAULT_CONFIG.connWarn, 1),
       connBan: toInteger(raw.connBan, DEFAULT_CONFIG.connBan, 1),
       synWarn: toInteger(raw.synWarn, DEFAULT_CONFIG.synWarn, 1),

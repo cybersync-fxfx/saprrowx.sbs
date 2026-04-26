@@ -46,7 +46,9 @@ export default function TrafficLedger({ events = [], limit = 18, compact = false
             <th>Source</th>
             <th>Destination</th>
             <th>State</th>
+            <th>Packets</th>
             <th>Size</th>
+            <th>Rate</th>
             <th>Queue</th>
             <th>Verdict</th>
           </tr>
@@ -55,11 +57,11 @@ export default function TrafficLedger({ events = [], limit = 18, compact = false
           {rows.map((event) => {
             const direction = String(event.direction || 'flow').toLowerCase();
             const source = direction === 'outgoing'
-              ? endpoint(event.localIp, event.localPort)
-              : endpoint(event.remoteIp, event.remotePort);
+              ? (event.sourceLabel || endpoint(event.localIp, event.localPort))
+              : (event.sourceLabel || endpoint(event.remoteIp, event.remotePort));
             const destination = direction === 'outgoing'
-              ? endpoint(event.remoteIp, event.remotePort)
-              : endpoint(event.localIp, event.localPort);
+              ? (event.destinationLabel || endpoint(event.remoteIp, event.remotePort))
+              : (event.destinationLabel || endpoint(event.localIp, event.localPort));
             const severity = event.severity || 'success';
 
             return (
@@ -74,7 +76,9 @@ export default function TrafficLedger({ events = [], limit = 18, compact = false
                 <td className="traffic-endpoint">{source}</td>
                 <td className="traffic-endpoint">{destination}</td>
                 <td>{event.state || '-'}</td>
+                <td>{event.packets === null || event.packets === undefined ? '-' : event.packets}</td>
                 <td>{formatBytes(event.sizeBytes)}</td>
+                <td>{Number(event.rateMbps || 0).toFixed(3)} Mbps</td>
                 <td>{Number(event.recvQ || 0)}/{Number(event.sendQ || 0)}</td>
                 <td>
                   <span className={`traffic-verdict ${severity}`}>

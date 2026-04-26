@@ -120,7 +120,7 @@ export default function Dashboard({ token }) {
 
   const telemetryLabel = useMemo(() => {
     if (!isConnected)    return 'No agent';
-    if (ageSec === null) return 'Waiting...';
+    if (ageSec === null) return 'LIVE';
     if (ageSec < 3)      return 'LIVE';
     return `${ageSec}s ago`;
   }, [isConnected, ageSec]);

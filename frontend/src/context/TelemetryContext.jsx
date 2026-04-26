@@ -160,8 +160,47 @@ export function TelemetryProvider({ token, children }) {
       setLogs(prev => [...lines, ...prev].slice(0, 500));
     }
 
-    if (Array.isArray(s.trafficEvents) && s.trafficEvents.length > 0) {
-      const normalized = s.trafficEvents.map((event, index) => ({
+    const incomingFallbackBytes = Math.round(Number(s.inMbps || 0) * 1_000_000 / 8);
+    const outgoingFallbackBytes = Math.round(Number(s.outMbps || 0) * 1_000_000 / 8);
+    const fallbackEvents = [
+      {
+        timestamp: new Date().toISOString(),
+        direction: 'incoming',
+        protocol: 'IFACE',
+        sourceLabel: 'network',
+        destinationLabel: s.iface || 'agent',
+        state: incomingFallbackBytes > 0 ? 'RX' : 'IDLE',
+        packets: Number(s.pps || 0) > 0 ? Math.round(Number(s.pps || 0) / 2) : 0,
+        sizeBytes: incomingFallbackBytes,
+        avgPacketBytes: Number(s.avgPacketBytes || 0),
+        rateMbps: Number(s.inMbps || 0),
+        iface: s.iface || '-',
+        severity: Number(s.inMbps || 0) >= 10 ? 'warning' : 'success',
+        reason: incomingFallbackBytes > 0 ? 'incoming normal traffic' : 'incoming idle',
+      },
+      {
+        timestamp: new Date().toISOString(),
+        direction: 'outgoing',
+        protocol: 'IFACE',
+        sourceLabel: s.iface || 'agent',
+        destinationLabel: 'network',
+        state: outgoingFallbackBytes > 0 ? 'TX' : 'IDLE',
+        packets: Number(s.pps || 0) > 0 ? Math.floor(Number(s.pps || 0) / 2) : 0,
+        sizeBytes: outgoingFallbackBytes,
+        avgPacketBytes: Number(s.avgPacketBytes || 0),
+        rateMbps: Number(s.outMbps || 0),
+        iface: s.iface || '-',
+        severity: Number(s.outMbps || 0) >= 10 ? 'warning' : 'success',
+        reason: outgoingFallbackBytes > 0 ? 'outgoing normal traffic' : 'outgoing idle',
+      },
+    ];
+
+    const trafficPayload = Array.isArray(s.trafficEvents) && s.trafficEvents.length > 0
+      ? s.trafficEvents
+      : fallbackEvents;
+
+    if (trafficPayload.length > 0) {
+      const normalized = trafficPayload.map((event, index) => ({
         id: [
           event.timestamp || Date.now(),
           event.protocol || 'IP',
@@ -179,10 +218,15 @@ export function TelemetryProvider({ token, children }) {
         localPort: event.localPort ?? '-',
         remoteIp: event.remoteIp || '-',
         remotePort: event.remotePort ?? '-',
+        sourceLabel: event.sourceLabel || '',
+        destinationLabel: event.destinationLabel || '',
         state: event.state || '-',
         recvQ: Number(event.recvQ || 0),
         sendQ: Number(event.sendQ || 0),
+        packets: event.packets === null || event.packets === undefined ? null : Number(event.packets || 0),
         sizeBytes: Number(event.sizeBytes || 0),
+        avgPacketBytes: Number(event.avgPacketBytes || 0),
+        rateMbps: Number(event.rateMbps || 0),
         iface: event.iface || s.iface || '-',
         severity: event.severity || 'success',
         reason: event.reason || 'normal flow',
