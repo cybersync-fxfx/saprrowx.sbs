@@ -195,6 +195,7 @@ button.danger:hover:not(:disabled) {
   border: 1px solid var(--panel-border);
   padding: 16px;
   transition: border-color 0.2s ease;
+  min-width: 0;
 }
 
 .glass-panel:hover {
@@ -603,10 +604,12 @@ button.danger:hover:not(:disabled) {
 .content-grid {
   display: grid;
   gap: 10px;
+  min-width: 0;
 }
 
 .content-grid.two-up {
-  grid-template-columns: 2fr 1fr;
+  grid-template-columns: minmax(0, 2fr) minmax(380px, 1fr);
+  align-items: start;
 }
 
 .panel-heading {
@@ -631,6 +634,7 @@ button.danger:hover:not(:disabled) {
   border: 1px solid rgba(59, 130, 246, 0.18);
   background: rgba(0, 0, 0, 0.28);
   min-height: 210px;
+  min-width: 0;
 }
 
 .dashboard-flow-fill {
@@ -660,6 +664,8 @@ button.danger:hover:not(:disabled) {
 .traffic-ledger {
   overflow-x: auto;
   max-height: 520px;
+  width: 100%;
+  min-width: 0;
 }
 
 .traffic-ledger.compact {
@@ -668,6 +674,10 @@ button.danger:hover:not(:disabled) {
 
 .traffic-table {
   min-width: 1080px;
+}
+
+.traffic-ledger.compact .traffic-table {
+  min-width: 920px;
 }
 
 .traffic-table th {
@@ -762,6 +772,11 @@ button.danger:hover:not(:disabled) {
   display: flex;
   flex-direction: column;
   gap: 0;
+  min-width: 0;
+}
+
+.agent-facts-panel {
+  min-width: 380px;
 }
 
 .fact-list.compact {
@@ -772,10 +787,17 @@ button.danger:hover:not(:disabled) {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 14px;
   padding: 6px 10px;
   border-bottom: 1px solid rgba(0, 255, 65, 0.1);
   transition: background 0.15s;
   font-size: 0.8rem;
+  min-width: 0;
+}
+
+.fact-row > span:first-child {
+  flex: 0 0 auto;
+  max-width: 44%;
 }
 
 .fact-row:hover {
@@ -790,8 +812,11 @@ button.danger:hover:not(:disabled) {
   font-size: 0.8rem;
   color: var(--accent-cyan);
   text-align: right;
-  max-width: 60%;
-  word-break: break-word;
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 68%;
+  overflow-wrap: anywhere;
+  word-break: normal;
 }
 .fact-value.danger { color: var(--danger-red); }
 .fact-value.success { color: var(--success-green); text-shadow: 0 0 8px var(--success-glow); }
@@ -1105,6 +1130,7 @@ tr:hover td {
 @media (max-width: 1280px) {
   .metric-grid { grid-template-columns: repeat(2, 1fr); }
   .content-grid.two-up { grid-template-columns: 1fr; }
+  .agent-facts-panel { min-width: 0; }
 }
 
 @media (max-width: 1024px) {

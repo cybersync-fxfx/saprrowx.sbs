@@ -357,7 +357,7 @@ export default function Dashboard({ token }) {
           </div>
         </article>
 
-        <article className="glass-panel elevated-panel">
+        <article className="glass-panel elevated-panel agent-facts-panel">
           <div className="panel-heading">
             <div><p className="eyebrow">Agent</p><h3>Live Facts</h3></div>
             <div className="meta-chip">{isConnected ? 'LIVE' : 'idle'}</div>

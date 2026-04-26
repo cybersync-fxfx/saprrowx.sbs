@@ -131,6 +131,10 @@ export default function ThreatRadar({ token }) {
   const lastScanLabel = radarStatus?.lastScanAt
     ? new Date(radarStatus.lastScanAt).toLocaleTimeString()
     : 'No scans yet';
+  const lastFlowLabel = trafficEvents[0]?.timestamp
+    ? new Date(trafficEvents[0].timestamp).toLocaleTimeString()
+    : 'waiting';
+  const liveFlowLabel = trafficEvents.length > 0 ? `Agent stream ${lastFlowLabel}` : 'Waiting for agent stream';
 
   const heuristics = useMemo(() => ([
     `TCP warn ${config.connWarn} / ban ${config.connBan}`,
@@ -155,6 +159,9 @@ export default function ThreatRadar({ token }) {
             {config.autoBan ? 'Auto-Ban Armed' : 'Watch-Only Mode'}
           </div>
           <div className="meta-chip">Last scan {lastScanLabel}</div>
+          <div className={`meta-chip ${trafficEvents.length > 0 ? 'text-green' : 'text-amber'}`}>
+            {liveFlowLabel}
+          </div>
         </div>
       </section>
 
@@ -206,6 +213,7 @@ export default function ThreatRadar({ token }) {
             <span className="meta-chip text-amber">Medium</span>
             <span className="meta-chip text-red">Suspicious</span>
             <span className="meta-chip">{(stats.pps || 0).toFixed(1)} pps</span>
+            <span className="meta-chip">{lastFlowLabel}</span>
             <span className="meta-chip">{trafficEvents.length} rows</span>
           </div>
         </div>
