@@ -161,22 +161,34 @@ function getPrimaryInterface() {
 
 function readNetBytes(cb) {
   const iface = String(getPrimaryInterface() || '').replace(/[^A-Za-z0-9_.:-]/g, '');
-  const cmd = iface
-    ? "awk -v want='" + iface + "' 'NR>2 {name=$1; gsub(\":\",\"\",name); if(name==want){print name,$2,$3,$10,$11; exit}}' /proc/net/dev"
-    : "awk 'NR>2 && $1 !~ /^lo:/ {print $1,$2,$3,$10,$11; exit}' /proc/net/dev";
+  const cmd = "awk 'NR>2 {name=$1; gsub(\":\",\"\",name); if(name!=\"lo\"){print name,$2,$3,$10,$11}}' /proc/net/dev";
   exec(cmd, (e,out)=>{
     if((!out||!out.trim())&&iface) {
       cachedPrimaryIface = '';
       return readNetBytes(cb);
     }
     if(e||!out.trim()) return cb(null,{rx:0,tx:0,iface:'unknown'});
-    const p=out.trim().split(/\s+/);
+    const rows=out
+      .trim()
+      .split('\n')
+      .map(line=>line.trim().split(/\s+/))
+      .filter(parts=>parts.length>=5);
+    if(rows.length===0) return cb(null,{rx:0,tx:0,iface:'unknown'});
+    const preferredRow=iface ? rows.find(parts=>String(parts[0])===iface) : null;
+    const displayIface=preferredRow ? String(preferredRow[0]) : String(rows[0][0]);
+    const totals=rows.reduce((acc, parts)=>{
+      acc.rx += parseInt(parts[1],10)||0;
+      acc.rxPackets += parseInt(parts[2],10)||0;
+      acc.tx += parseInt(parts[3],10)||0;
+      acc.txPackets += parseInt(parts[4],10)||0;
+      return acc;
+    }, { rx:0, tx:0, rxPackets:0, txPackets:0 });
     cb(null,{
-      iface:(p[0]||'').replace(':',''),
-      rx:parseInt(p[1])||0,
-      rxPackets:parseInt(p[2])||0,
-      tx:parseInt(p[3])||0,
-      txPackets:parseInt(p[4])||0
+      iface:displayIface||'unknown',
+      rx:totals.rx,
+      rxPackets:totals.rxPackets,
+      tx:totals.tx,
+      txPackets:totals.txPackets
     });
   });
 }

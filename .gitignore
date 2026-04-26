@@ -5,3 +5,4 @@ frontend/dist/
 server-start.out.txt
 server-start.err.txt
 state/
+storage/

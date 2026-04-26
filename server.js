@@ -86,6 +86,126 @@ let db = { agents: {} }; // agents store runtime state
 let commandQueue = {}; // { agentId: [{ id, cmd }] }
 let commandLedger = {}; // { cmdId: { agentId, kind, status, output, ... } }
 let radar = null;
+const STORAGE_ROOT = path.join(__dirname, 'storage');
+const RUNTIME_STATE_PATH = path.join(STORAGE_ROOT, 'runtime-state.json');
+const RUNTIME_SNAPSHOT_INTERVAL_MS = 15000;
+
+fs.mkdirSync(STORAGE_ROOT, { recursive: true });
+
+const safeId = (value, fallback = 'unknown-client') => {
+  const normalized = String(value || '').trim().replace(/[^a-zA-Z0-9._-]/g, '_');
+  return normalized || fallback;
+};
+
+const getClientDir = (clientId) => {
+  const dir = path.join(STORAGE_ROOT, safeId(clientId));
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
+};
+
+const getDailyLogKey = (date = new Date()) => {
+  const shifted = new Date(date.getTime());
+  // Day boundary starts at 1:00 AM local time.
+  if (shifted.getHours() < 1) {
+    shifted.setDate(shifted.getDate() - 1);
+  }
+  const y = shifted.getFullYear();
+  const m = String(shifted.getMonth() + 1).padStart(2, '0');
+  const d = String(shifted.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+};
+
+const appendClientLog = (clientId, entry) => {
+  try {
+    const clientDir = getClientDir(clientId);
+    const logsDir = path.join(clientDir, 'logs');
+    fs.mkdirSync(logsDir, { recursive: true });
+    const filePath = path.join(logsDir, `${getDailyLogKey()}.jsonl`);
+    fs.appendFileSync(filePath, `${JSON.stringify(entry)}\n`);
+  } catch (err) {
+    console.error('[storage] failed to append client log:', err.message);
+  }
+};
+
+const writeClientLatestSnapshot = (clientId, payload) => {
+  try {
+    const clientDir = getClientDir(clientId);
+    fs.writeFileSync(
+      path.join(clientDir, 'latest.json'),
+      JSON.stringify({ updatedAt: new Date().toISOString(), ...payload }, null, 2)
+    );
+  } catch (err) {
+    console.error('[storage] failed to write client latest snapshot:', err.message);
+  }
+};
+
+const buildRuntimeSnapshot = () => ({
+  updatedAt: new Date().toISOString(),
+  profileTunnelStatus: db.profileTunnelStatus || {},
+  lastStats: db.lastStats || {},
+  commandLedger: Object.values(commandLedger)
+    .sort((a, b) => Date.parse(b.completedAt || b.dispatchedAt || b.createdAt || 0) - Date.parse(a.completedAt || a.dispatchedAt || a.createdAt || 0))
+    .slice(0, 500),
+});
+
+const persistRuntimeSnapshot = () => {
+  try {
+    fs.writeFileSync(RUNTIME_STATE_PATH, JSON.stringify(buildRuntimeSnapshot(), null, 2));
+  } catch (err) {
+    console.error('[storage] failed to persist runtime snapshot:', err.message);
+  }
+};
+
+const restoreRuntimeSnapshot = () => {
+  try {
+    if (!fs.existsSync(RUNTIME_STATE_PATH)) return;
+    const raw = fs.readFileSync(RUNTIME_STATE_PATH, 'utf8');
+    if (!raw.trim()) return;
+    const parsed = JSON.parse(raw);
+    db.profileTunnelStatus = parsed.profileTunnelStatus || {};
+    db.lastStats = parsed.lastStats || {};
+    const restoredLedger = Array.isArray(parsed.commandLedger) ? parsed.commandLedger : [];
+    commandLedger = {};
+    restoredLedger.forEach((entry) => {
+      if (entry && entry.id) commandLedger[entry.id] = entry;
+    });
+  } catch (err) {
+    console.error('[storage] failed to restore runtime snapshot:', err.message);
+  }
+};
+
+const scheduleDailyLogReset = () => {
+  const now = new Date();
+  const next = new Date(now);
+  next.setHours(1, 0, 0, 0);
+  if (next <= now) next.setDate(next.getDate() + 1);
+  const delay = Math.max(1000, next.getTime() - now.getTime());
+
+  setTimeout(() => {
+    const timestamp = new Date().toISOString();
+    const clientIds = new Set([
+      ...Object.keys(db.agents || {}),
+      ...Object.values(db.lastStats || {}).map((entry) => entry?.stats?.agentId).filter(Boolean),
+      ...Object.values(db.lastStats || {}).map((entry) => entry?.agent?.agentId).filter(Boolean),
+    ]);
+
+    clientIds.forEach((clientId) => {
+      appendClientLog(clientId, {
+        type: 'daily_reset',
+        message: 'Daily log reset boundary reached (1:00 AM local time).',
+        at: timestamp,
+      });
+    });
+
+    db.dailyResetAt = timestamp;
+    persistRuntimeSnapshot();
+    scheduleDailyLogReset();
+  }, delay);
+};
+
+restoreRuntimeSnapshot();
+setInterval(persistRuntimeSnapshot, RUNTIME_SNAPSHOT_INTERVAL_MS);
+scheduleDailyLogReset();
 
 const ipv4Pattern = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/;
 const CLIENT_TUNNEL_SCRIPT_SOURCE = fs
@@ -845,9 +965,7 @@ function getPrimaryInterface() {
 function readNetBytes(cb) {
   const { exec } = require('child_process');
   const iface = String(getPrimaryInterface() || '').replace(/[^A-Za-z0-9_.:-]/g, '');
-  const cmd = iface
-    ? "awk -v want='" + iface + "' 'NR>2 {name=$1; gsub(\":\",\"\",name); if(name==want){print name,$2,$3,$10,$11; exit}}' /proc/net/dev"
-    : "awk 'NR>2 && $1 !~ /^lo:/ {print $1,$2,$3,$10,$11; exit}' /proc/net/dev";
+  const cmd = "awk 'NR>2 {name=$1; gsub(\":\",\"\",name); if(name!=\"lo\"){print name,$2,$3,$10,$11}}' /proc/net/dev";
 
   exec(cmd, (err, out) => {
     if ((!out || !out.trim()) && iface) {
@@ -855,13 +973,33 @@ function readNetBytes(cb) {
       return readNetBytes(cb);
     }
     if (err || !out.trim()) return cb(null, { rx: 0, tx: 0, iface: 'unknown' });
-    const parts = out.trim().split(/\s+/);
+    const rows = out
+      .trim()
+      .split('\n')
+      .map((line) => line.trim().split(/\s+/))
+      .filter((parts) => parts.length >= 5);
+
+    if (rows.length === 0) return cb(null, { rx: 0, tx: 0, iface: 'unknown' });
+
+    const preferredRow = iface
+      ? rows.find((parts) => String(parts[0]) === iface)
+      : null;
+    const displayIface = preferredRow ? String(preferredRow[0]) : String(rows[0][0]);
+
+    const totals = rows.reduce((acc, parts) => {
+      acc.rx += parseInt(parts[1], 10) || 0;
+      acc.rxPackets += parseInt(parts[2], 10) || 0;
+      acc.tx += parseInt(parts[3], 10) || 0;
+      acc.txPackets += parseInt(parts[4], 10) || 0;
+      return acc;
+    }, { rx: 0, tx: 0, rxPackets: 0, txPackets: 0 });
+
     cb(null, {
-      iface: (parts[0] || '').replace(':', ''),
-      rx: parseInt(parts[1]) || 0,
-      rxPackets: parseInt(parts[2]) || 0,
-      tx: parseInt(parts[3]) || 0,
-      txPackets: parseInt(parts[4]) || 0
+      iface: displayIface || 'unknown',
+      rx: totals.rx,
+      rxPackets: totals.rxPackets,
+      tx: totals.tx,
+      txPackets: totals.txPackets
     });
   });
 }
@@ -1294,9 +1432,34 @@ app.post('/api/agent/stats', agentAuthMiddleware, (req, res) => {
   if (!db.lastStats) db.lastStats = {};
   db.lastStats[req.user.id] = {
     stats,
-    agent: { hostname: agent.hostname || '-', ip: agent.ip || '-', os: agent.os || 'Ubuntu' },
+    agent: { agentId, hostname: agent.hostname || '-', ip: agent.ip || '-', os: agent.os || 'Ubuntu' },
     savedAt: Date.now(),
   };
+
+  appendClientLog(agentId, {
+    type: 'stats_update',
+    at: new Date().toISOString(),
+    userId: req.user.id,
+    stats: {
+      connections: stats?.connections ?? 0,
+      established: stats?.established ?? 0,
+      synRate: stats?.synRate ?? 0,
+      bannedIPs: stats?.bannedIPs ?? 0,
+      cpuPercent: stats?.cpuPercent ?? 0,
+      memPercent: stats?.memPercent ?? 0,
+      inMbps: stats?.inMbps ?? 0,
+      outMbps: stats?.outMbps ?? 0,
+      pps: stats?.pps ?? 0,
+      uptime: stats?.uptime ?? 0,
+      iface: stats?.iface || '-',
+    },
+  });
+  writeClientLatestSnapshot(agentId, {
+    userId: req.user.id,
+    agent: { hostname: agent.hostname || '-', ip: agent.ip || '-', os: agent.os || 'Ubuntu' },
+    stats,
+  });
+  persistRuntimeSnapshot();
 
   broadcastToUser(req.user.id, {
     type: 'stats_update',
@@ -1332,6 +1495,17 @@ app.get('/api/agent/commands', agentAuthMiddleware, (req, res) => {
 app.post('/api/agent/command-result', agentAuthMiddleware, (req, res) => {
   const { cmdId, output, exitCode, kind } = req.body;
   const result = recordCommandResult(cmdId, { output, exitCode, kind });
+  appendClientLog(req.user.agentId, {
+    type: 'command_result',
+    at: new Date().toISOString(),
+    cmdId,
+    kind: result.kind || kind || null,
+    status: result.status,
+    exitCode: result.exitCode,
+    summary: result.summary || null,
+    output: trimCommandOutput(output, 2000),
+  });
+  persistRuntimeSnapshot();
   broadcastToUser(req.user.id, { type: 'command_result', cmdId, output, exitCode, kind: result.kind, status: result.status });
   res.json({ success: true });
 });
@@ -1357,6 +1531,14 @@ app.post('/api/command', authMiddleware, (req, res) => {
     kind: 'shell',
     summary: cmd.substring(0, 120)
   });
+  appendClientLog(targetAgentId, {
+    type: 'command_queued',
+    at: new Date().toISOString(),
+    userId,
+    cmdId: cmdObj.id,
+    summary: cmdObj.summary,
+  });
+  persistRuntimeSnapshot();
 
   console.log(`[cmd] Queued for agent ${targetAgentId}: ${cmd.substring(0, 80)}...`);
   res.json({ success: true, cmdId: cmdObj.id });
@@ -1817,6 +1999,36 @@ app.get('/api/internal/agents', (req, res) => {
     return res.status(403).json({ error: 'Forbidden' });
   }
   res.json(db.agents);
+});
+
+app.get('/api/internal/storage-status', (req, res) => {
+  const clientIp = req.socket.remoteAddress;
+  if (clientIp !== '127.0.0.1' && clientIp !== '::1' && clientIp !== '::ffff:127.0.0.1') {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+
+  let runtimeState = null;
+  try {
+    if (fs.existsSync(RUNTIME_STATE_PATH)) {
+      runtimeState = JSON.parse(fs.readFileSync(RUNTIME_STATE_PATH, 'utf8'));
+    }
+  } catch (_) {
+    runtimeState = null;
+  }
+
+  res.json({
+    ok: true,
+    storageRoot: STORAGE_ROOT,
+    runtimeStatePath: RUNTIME_STATE_PATH,
+    runtimeStateUpdatedAt: runtimeState?.updatedAt || null,
+    connectedAgents: Object.keys(db.agents || {}).length,
+    knownClients: [
+      ...new Set([
+        ...Object.keys(db.agents || {}),
+        ...Object.values(db.lastStats || {}).map((entry) => entry?.agent?.agentId).filter(Boolean),
+      ]),
+    ],
+  });
 });
 
 app.get('/api/health', (req, res) => {
