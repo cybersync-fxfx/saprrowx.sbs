@@ -467,7 +467,7 @@ export default function Dashboard({ token }) {
             <div className="meta-chip">{logs.length} lines</div>
           </div>
         </div>
-        <div className="terminal-log terminal-large">
+        <div className="terminal-log security-log-compact">
           {logs.length === 0
             ? <div className="empty-state">Waiting for agent log stream — SSH &amp; firewall events will appear here…</div>
             : logs.map((log, idx) => (

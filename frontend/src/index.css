@@ -836,6 +836,12 @@ button.danger:hover:not(:disabled) {
 
 .terminal-log.medium { min-height: 220px; }
 .terminal-log.terminal-large { min-height: 320px; }
+.terminal-log.security-log-compact {
+  height: 230px;
+  min-height: 230px;
+  max-height: 230px;
+  overflow: auto;
+}
 
 .terminal-log::before {
   content: '';
