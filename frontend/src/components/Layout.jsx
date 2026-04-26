@@ -51,6 +51,7 @@ export default function Layout({ user, setToken }) {
             <RadioTower size={14} />
             {agentStatus === 'CONNECTED' ? 'CONNECTED' : 'NO AGENT'}
           </div>
+          <div className="meta-chip">WS {wsState}</div>
           <div className="topbar-time">{time}</div>
           <div className="user-chip">@{user?.username}</div>
           <button className="icon-button danger-outline" onClick={handleLogout} aria-label="Log out">

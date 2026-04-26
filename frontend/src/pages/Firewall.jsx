@@ -32,6 +32,12 @@ export default function Firewall({ token, user }) {
   const [isBusy, setIsBusy] = useState(false);
 
   const runInspection = async (action) => {
+    if (action.command.includes('systemctl restart nftables')) {
+      const approved = window.confirm(
+        'This will restart nftables on the remote server. Continue?'
+      );
+      if (!approved) return;
+    }
     setActiveCommand(action.title);
     setErrorMessage('');
     setIsBusy(true);

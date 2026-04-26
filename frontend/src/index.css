@@ -24,6 +24,7 @@
   --text-main: #f0f4ff;
   --text-soft: #94a3b8;
   --text-muted: #64748b;
+  --text-dim: #718096;
   
   --shadow-lg: 0 0px 30px rgba(59, 130, 246, 0.12);
   --shadow-sm: 0 0px 15px rgba(59, 130, 246, 0.08);
@@ -53,6 +54,10 @@ body {
   font-family: var(--font-body);
   overflow-x: hidden;
   -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: inherit;
 }
 
 /* Background Animated Grid */
@@ -153,6 +158,14 @@ button:disabled {
   box-shadow: none;
   border-color: transparent;
   cursor: not-allowed;
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+a:focus-visible {
+  outline: 2px solid rgba(59, 130, 246, 0.75);
+  outline-offset: 2px;
 }
 
 button.danger, .danger-outline {
@@ -295,6 +308,10 @@ button.danger:hover:not(:disabled) {
   padding: 4px 10px;
   font-size: 0.7rem;
   font-weight: 500;
+}
+
+.danger-text {
+  color: var(--danger-red);
 }
 
 .status-pill {
@@ -988,6 +1005,17 @@ tr:hover td {
   .metric-grid { grid-template-columns: 1fr; }
   .terminal-form { flex-direction: column; align-items: stretch; }
   .page-title { font-size: 2.2rem; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 /* Theme Overrides */

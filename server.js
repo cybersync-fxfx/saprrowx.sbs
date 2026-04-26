@@ -70,7 +70,16 @@ const supabaseAdmin = ADMIN_FEATURES_ENABLED
     })
   : supabase;
 
-app.use(express.json());
+app.disable('x-powered-by');
+app.use(express.json({ limit: '200kb' }));
+app.use(express.urlencoded({ extended: false, limit: '50kb' }));
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
+  next();
+});
 app.use(express.static(path.join(__dirname, 'frontend', 'dist')));
 
 let db = { agents: {} }; // agents store runtime state
@@ -596,7 +605,7 @@ app.post('/api/admin/reject', authMiddleware, adminMiddleware, privilegedSupabas
   res.json({ success: true });
 });
 
-app.get('/api/guard/blocklist', authMiddleware, (req, res) => {
+app.get('/api/guard/blocklist', authMiddleware, adminMiddleware, (req, res) => {
   try {
     const result = listGuardBlockedIps();
     res.json({
@@ -608,7 +617,7 @@ app.get('/api/guard/blocklist', authMiddleware, (req, res) => {
   }
 });
 
-app.post('/api/guard/blocklist', authMiddleware, (req, res) => {
+app.post('/api/guard/blocklist', authMiddleware, adminMiddleware, (req, res) => {
   try {
     const ip = assertValidIpv4(req.body?.ip);
     const result = addGuardBlockedIp(ip);
@@ -624,7 +633,7 @@ app.post('/api/guard/blocklist', authMiddleware, (req, res) => {
   }
 });
 
-app.delete('/api/guard/blocklist/:ip', authMiddleware, (req, res) => {
+app.delete('/api/guard/blocklist/:ip', authMiddleware, adminMiddleware, (req, res) => {
   try {
     const ip = assertValidIpv4(req.params.ip);
     const result = removeGuardBlockedIp(ip);
@@ -642,8 +651,19 @@ app.delete('/api/guard/blocklist/:ip', authMiddleware, (req, res) => {
 
 // Agent Installer Download
 app.get('/api/agent/download', authMiddleware, (req, res) => {
-  const osType = req.query.os || 'ubuntu';
-  const serverUrl = req.query.serverUrl || (req.protocol + '://' + req.get('host'));
+  const requestedOs = String(req.query.os || 'ubuntu').toLowerCase();
+  const osType = ['ubuntu', 'debian'].includes(requestedOs) ? requestedOs : 'ubuntu';
+  const fallbackServerUrl = req.protocol + '://' + req.get('host');
+  const requestedServerUrl = String(req.query.serverUrl || fallbackServerUrl).trim();
+  let serverUrl = fallbackServerUrl;
+  try {
+    const parsed = new URL(requestedServerUrl);
+    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+      serverUrl = parsed.origin;
+    }
+  } catch (_) {
+    serverUrl = fallbackServerUrl;
+  }
   
   let osCheckScript = `OS_VERSION=$(grep -oP '(?<=^VERSION_ID=").*(?=")' /etc/os-release)
 if [[ "$osType" == "ubuntu" ]]; then
@@ -1259,8 +1279,7 @@ async function setupTunnel(req, res, agentId, clientIp, options = {}) {
     console.error(`[tunnel] Tunnel creation failed for agent ${agentId}:`, err);
     res.status(500).json({ 
       error: 'Tunnel creation failed', 
-      message: err.message,
-      stack: err.stack
+      message: err.message
     });
   }
 }

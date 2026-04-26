@@ -11,6 +11,9 @@ const quickActions = [
   'tail -n 40 /var/log/sbs/agent.log',
   'nft list ruleset | head -30',
 ];
+const dangerousCommandPattern = /\b(rm\s+-rf|mkfs|dd\s+if=|shutdown|reboot|poweroff|iptables\s+-F|nft\s+flush|systemctl\s+(stop|disable)\s+)/i;
+
+const needsConfirmation = (cmd) => dangerousCommandPattern.test(String(cmd || '').trim());
 
 export default function Terminal({ token, user }) {
   const { sendCommand, isConnected, commandReady, wsState } = useTelemetry();
@@ -31,6 +34,12 @@ export default function Terminal({ token, user }) {
 
   const runCommand = async (cmd) => {
     if (!cmd.trim()) return;
+    if (needsConfirmation(cmd)) {
+      const approved = window.confirm(
+        `This command looks potentially destructive:\n\n${cmd}\n\nRun it on the remote server?`
+      );
+      if (!approved) return;
+    }
     setLogs(prev => [...prev, { text: `root@server:~$ ${cmd}`, level: 'info' }]);
     setHistory(prev => [cmd, ...prev].slice(0, 50));
     setHistIdx(-1);
