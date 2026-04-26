@@ -1922,6 +1922,76 @@ radar = new RadarScanner(supabaseAdmin, {
 });
 radar.start();
 
+function getRadarModePatch(mode) {
+  const normalized = String(mode || '').trim().toLowerCase();
+  if (normalized === 'normal') {
+    return {
+      mode: 'normal',
+      patch: {
+        autoBan: true,
+        threshold: 90,
+        watchThreshold: 55,
+        connWarn: 80,
+        connBan: 220,
+        synWarn: 30,
+        synBan: 90,
+        udpWarn: 140,
+        udpBan: 360,
+        burstWarn: 60,
+        burstBan: 180,
+        portFanoutWarn: 6,
+        portFanoutBan: 12,
+      },
+    };
+  }
+
+  if (normalized === 'strict') {
+    return {
+      mode: 'strict',
+      patch: {
+        autoBan: true,
+        threshold: 80,
+        watchThreshold: 45,
+        connWarn: 60,
+        connBan: 160,
+        synWarn: 20,
+        synBan: 60,
+        udpWarn: 100,
+        udpBan: 260,
+        burstWarn: 45,
+        burstBan: 120,
+        portFanoutWarn: 4,
+        portFanoutBan: 8,
+      },
+    };
+  }
+
+  if (normalized === 'shield') {
+    return {
+      mode: 'shield',
+      patch: {
+        autoBan: true,
+        threshold: 65,
+        watchThreshold: 35,
+        connWarn: 40,
+        connBan: 100,
+        synWarn: 12,
+        synBan: 35,
+        synRatioWarn: 0.45,
+        synRatioBan: 0.65,
+        udpWarn: 70,
+        udpBan: 160,
+        burstWarn: 25,
+        burstBan: 70,
+        portFanoutWarn: 3,
+        portFanoutBan: 6,
+      },
+    };
+  }
+
+  return null;
+}
+
 // ── Websocket logic ──────────────────────────────────────────
 const clients = {}; // { userId: [ws1, ws2] }
 
@@ -2066,6 +2136,32 @@ app.post('/api/radar/scan', authMiddleware, adminMiddleware, async (req, res) =>
     res.json(next);
   } catch (err) {
     res.status(500).json({ error: err.message || 'Threat Radar scan failed.' });
+  }
+});
+
+app.post('/api/radar/mode', authMiddleware, adminMiddleware, (req, res) => {
+  if (!radar) {
+    return res.status(503).json({ error: 'Threat Radar is not initialized.' });
+  }
+
+  const selected = getRadarModePatch(req.body?.mode);
+  if (!selected) {
+    return res.status(400).json({ error: 'Unsupported mode. Use normal, strict, or shield.' });
+  }
+
+  try {
+    const next = radar.updateConfig(selected.patch);
+    appendAttackLog(`[radar-mode] switched to ${selected.mode} by ${req.user.username || req.user.email || req.user.id}`);
+    broadcastToAll({
+      type: 'radar_mode_changed',
+      mode: selected.mode,
+      changedBy: req.user.username || req.user.email || req.user.id,
+      changedAt: new Date().toISOString(),
+      config: next?.config || null,
+    });
+    res.json({ success: true, mode: selected.mode, radar: next });
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Failed to switch Threat Radar mode.' });
   }
 });
 

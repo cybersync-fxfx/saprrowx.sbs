@@ -27,6 +27,7 @@ export default function ThreatRadar({ token }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [setupRequired, setSetupRequired] = useState(false);
+  const [modeBusy, setModeBusy] = useState('');
 
   const fetchStats = () => {
     fetch('/api/radar/stats', { headers: { Authorization: `Bearer ${token}` } })
@@ -91,6 +92,31 @@ export default function ThreatRadar({ token }) {
     : 'waiting';
   const liveFlowLabel = trafficEvents.length > 0 ? `Agent stream ${lastFlowLabel}` : 'Waiting for agent stream';
 
+  const switchMode = async (mode) => {
+    if (!token || modeBusy) return;
+    setModeBusy(mode);
+    try {
+      const res = await fetch('/api/radar/mode', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ mode }),
+      });
+      const payload = await res.json();
+      if (!res.ok) throw new Error(payload.error || 'Failed to change defense mode.');
+      if (payload?.radar?.config) {
+        setConfig((prev) => ({ ...prev, ...payload.radar.config }));
+      }
+      fetchStats();
+    } catch (e) {
+      alert(e.message || 'Failed to change defense mode.');
+    } finally {
+      setModeBusy('');
+    }
+  };
+
   return (
     <div className="page-shell">
       <section className="hero-panel">
@@ -141,6 +167,45 @@ export default function ThreatRadar({ token }) {
           <div className="metric-label">Scan Loop</div>
           <div className="metric-value">{Math.max(1, Math.round((config.scanIntervalMs || 1000) / 1000))}s</div>
         </article>
+      </section>
+
+      <section className="glass-panel elevated-panel">
+        <div className="panel-heading">
+          <div>
+            <p className="eyebrow">Defense Modes</p>
+            <h3>Rapid DDoS Protection Presets</h3>
+          </div>
+          <div className="meta-chip">Admin control</div>
+        </div>
+        <div className="button-row">
+          <button
+            type="button"
+            className="secondary-button"
+            disabled={Boolean(modeBusy)}
+            onClick={() => switchMode('normal')}
+          >
+            {modeBusy === 'normal' ? 'Applying...' : 'Normal'}
+          </button>
+          <button
+            type="button"
+            className="secondary-button"
+            disabled={Boolean(modeBusy)}
+            onClick={() => switchMode('strict')}
+          >
+            {modeBusy === 'strict' ? 'Applying...' : 'Strict'}
+          </button>
+          <button
+            type="button"
+            className="danger"
+            disabled={Boolean(modeBusy)}
+            onClick={() => switchMode('shield')}
+          >
+            {modeBusy === 'shield' ? 'Applying...' : 'Shield Mode'}
+          </button>
+        </div>
+        <div className="callout-inline warning" style={{ marginTop: '10px' }}>
+          Use <strong>Shield Mode</strong> during active attacks. It lowers ban thresholds aggressively for faster containment.
+        </div>
       </section>
 
       <section className="glass-panel elevated-panel">

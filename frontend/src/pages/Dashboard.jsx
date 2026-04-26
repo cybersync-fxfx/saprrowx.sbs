@@ -126,6 +126,23 @@ export default function Dashboard({ token }) {
   }, [isConnected, ageSec]);
 
   const wsLabel = { open: 'WS OK', connecting: 'WS Connecting', reconnecting: 'WS Reconnecting', error: 'WS Error' }[wsState] || wsState;
+  const topAttackSources = useMemo(() => {
+    const scores = new Map();
+    for (const event of trafficEvents) {
+      const direction = String(event?.direction || '').toLowerCase();
+      const severity = String(event?.severity || '').toLowerCase();
+      if (direction !== 'incoming') continue;
+      if (!['warning', 'danger'].includes(severity)) continue;
+      const ip = String(event?.remoteIp || '').trim();
+      if (!ip || ip === '-' || ip === 'network') continue;
+      const increment = severity === 'danger' ? 3 : 1;
+      scores.set(ip, (scores.get(ip) || 0) + increment);
+    }
+    return [...scores.entries()]
+      .map(([ip, score]) => ({ ip, score }))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 6);
+  }, [trafficEvents]);
   const latestTunnelJob = tunnelMeta?.lastTunnelCommand || null;
   const postureTunnelLabel =
     tunnelStatus === 'loading' ? 'Checking' :
@@ -456,6 +473,41 @@ export default function Dashboard({ token }) {
             <div className="fact-row"><span>Firewall Status</span><span className={`fact-value ${firewallTone}`}>{firewallLabel}</span></div>
           </div>
         </article>
+      </section>
+
+      <section className="glass-panel elevated-panel">
+        <div className="panel-heading">
+          <div><p className="eyebrow">DDoS Intel</p><h3>Top Attack Sources (Live)</h3></div>
+          <div className="meta-chip">{topAttackSources.length} tracked</div>
+        </div>
+        {topAttackSources.length === 0 ? (
+          <div className="empty-state">No high-risk inbound sources detected in the current live stream.</div>
+        ) : (
+          <div className="table-shell">
+            <table>
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Source IP</th>
+                  <th>Threat Score</th>
+                  <th>Suggested Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {topAttackSources.map((item, idx) => (
+                  <tr key={item.ip}>
+                    <td>{idx + 1}</td>
+                    <td className="font-mono">{item.ip}</td>
+                    <td>
+                      <span className={`fact-value ${item.score >= 6 ? 'danger' : 'warning'}`}>{item.score}</span>
+                    </td>
+                    <td>{item.score >= 6 ? 'Immediate ban recommended' : 'Watch and score further'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </section>
 
       <section className="glass-panel elevated-panel">
