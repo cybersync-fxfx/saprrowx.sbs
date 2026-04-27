@@ -19,7 +19,7 @@ export default function Terminal({ token, user }) {
   const { sendCommand, isConnected, commandReady, wsState } = useTelemetry();
 
   const [logs, setLogs] = useState([
-    { text: '[ SBS SECURE TERMINAL ]', level: 'info' },
+    { text: '[ SPARROWX SECURE TERMINAL ]', level: 'info' },
     { text: 'Agent commands execute on your protected server via the secure channel.', level: 'default' },
   ]);
   const [input, setInput] = useState('');
@@ -90,7 +90,7 @@ export default function Terminal({ token, user }) {
         </div>
         <div className="hero-status-stack">
           <div className={`status-pill ${isConnected ? 'connected' : 'disconnected'}`}>
-            {isConnected ? '● Agent Ready' : '○ No Agent'}
+            {isConnected ? '* Agent Ready' : 'o No Agent'}
           </div>
           <div className="meta-chip" style={{ color: wsState === 'open' ? 'var(--accent-cyan)' : 'var(--warn-amber)' }}>
             WS {wsState}
@@ -103,7 +103,7 @@ export default function Terminal({ token, user }) {
           <strong>[!]</strong>
           <span>
             {wsState === 'reconnecting'
-              ? 'Reconnecting — commands will be available once the connection is restored.'
+              ? 'Reconnecting - commands will be available once the connection is restored.'
               : 'Agent not connected. Install the agent on your target server first.'}
           </span>
         </section>
@@ -132,7 +132,7 @@ export default function Terminal({ token, user }) {
             className="terminal-input"
             autoComplete="off"
             disabled={isRunning || !commandReady}
-            placeholder={commandReady ? 'Enter a command (↑↓ history)' : 'Waiting for agent...'}
+            placeholder={commandReady ? 'Enter a command (UpDown history)' : 'Waiting for agent...'}
           />
           <button type="submit" disabled={isRunning || !commandReady}>
             {isRunning ? '...' : 'RUN'}

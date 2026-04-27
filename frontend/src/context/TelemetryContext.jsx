@@ -3,9 +3,10 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState } f
 const CHART_POINTS = 60;
 const emptyArr = () => Array(CHART_POINTS).fill(0);
 
-const STORAGE_KEY = 'sbs_telemetry_v2';
+const STORAGE_KEY = 'sparrowx_telemetry_v2';
+const LEGACY_STORAGE_KEY = 'sbs_telemetry_v2';
 
-// ── Persist / restore helpers ─────────────────────────────────────────────────
+// -- Persist / restore helpers -------------------------------------------------
 function saveToStorage(data) {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({
@@ -17,7 +18,7 @@ function saveToStorage(data) {
 
 function loadFromStorage() {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(STORAGE_KEY) || localStorage.getItem(LEGACY_STORAGE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     // Only restore if saved within the last 10 minutes
@@ -35,7 +36,7 @@ export function useTelemetry() {
 }
 
 export function TelemetryProvider({ token, children }) {
-  // ── Restore persisted state on first render ───────────────────────────────
+  // -- Restore persisted state on first render -------------------------------
   const saved = loadFromStorage();
 
   const [wsState,     setWsState]     = useState('connecting');
@@ -60,7 +61,7 @@ export function TelemetryProvider({ token, children }) {
   const [trafficEvents, setTrafficEvents] = useState(saved?.trafficEvents ?? []);
   const [lastUpdateMs, setLastUpdateMs] = useState(saved?.lastUpdateMs ?? null);
 
-  // ── Persist to localStorage whenever key state changes ────────────────────
+  // -- Persist to localStorage whenever key state changes --------------------
   const statsRef      = useRef(stats);
   const cpuHistRef    = useRef(cpuHistory);
   const netHistRef    = useRef(netHistory);
@@ -80,7 +81,7 @@ export function TelemetryProvider({ token, children }) {
   useEffect(() => { lastUpdateRef.current = lastUpdateMs; }, [lastUpdateMs]);
   useEffect(() => { agentStatRef.current = agentStatus; }, [agentStatus]);
 
-  // Debounced save — write to localStorage at most once per second
+  // Debounced save - write to localStorage at most once per second
   const saveTimerRef = useRef(null);
   const scheduleSave = useCallback(() => {
     clearTimeout(saveTimerRef.current);
@@ -101,7 +102,7 @@ export function TelemetryProvider({ token, children }) {
   // Save whenever any piece of state updates
   useEffect(() => { scheduleSave(); }, [stats, cpuHistory, netHistory, logs, trafficEvents, scheduleSave]);
 
-  // ── WebSocket management ─────────────────────────────────────────────────
+  // -- WebSocket management -------------------------------------------------
   const wsRef       = useRef(null);
   const retryTimer  = useRef(null);
   const retryCount  = useRef(0);
@@ -143,7 +144,7 @@ export function TelemetryProvider({ token, children }) {
       iface:       s.iface        || prev.iface,
     }));
 
-    // Rolling chart history — always accumulate, even off-screen
+    // Rolling chart history - always accumulate, even off-screen
     setCpuHistory(prev => ({
       cpu: [...prev.cpu.slice(1), Number((s.cpuPercent || 0).toFixed(1))],
       mem: [...prev.mem.slice(1), Number((s.memPercent || 0).toFixed(1))],
@@ -312,7 +313,7 @@ export function TelemetryProvider({ token, children }) {
       setWsState('reconnecting');
       pendingCmds.current.forEach(({ reject, timeoutId }) => {
         clearTimeout(timeoutId);
-        reject(new Error('Connection lost — reconnecting…'));
+        reject(new Error('Connection lost - reconnecting...'));
       });
       pendingCmds.current.clear();
       const delay = Math.min(1000 * Math.pow(2, retryCount.current), 10000);
@@ -357,10 +358,10 @@ export function TelemetryProvider({ token, children }) {
     };
   }, [connect, token, processStatsUpdate]);
 
-  // ── sendCommand — shared by Terminal, Firewall, Blocklist ─────────────────
+  // -- sendCommand - shared by Terminal, Firewall, Blocklist -----------------
   const sendCommand = useCallback(async (cmd, { timeoutMs = 45000 } = {}) => {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-      throw new Error('Connection not ready — waiting for the secure channel to open.');
+      throw new Error('Connection not ready - waiting for the secure channel to open.');
     }
 
     const res = await fetch('/api/command', {

@@ -1,16 +1,26 @@
 const fs = require('fs');
 const path = require('path');
 
-const DEFAULT_POOL_CIDR = process.env.SBS_TUNNEL_POOL || '10.200.0.0/16';
+function envCompat(primaryName, legacyName, fallback = '') {
+  const primary = process.env[primaryName];
+  if (primary !== undefined && primary !== '') return primary;
+  const legacy = process.env[legacyName];
+  if (legacy !== undefined && legacy !== '') return legacy;
+  return fallback;
+}
+
+const DEFAULT_POOL_CIDR = envCompat('SPARROWX_TUNNEL_POOL', 'SBS_TUNNEL_POOL', '10.200.0.0/16');
 
 function getTunnelStateDir() {
+  if (process.env.SPARROWX_STATE_DIR) return process.env.SPARROWX_STATE_DIR;
   if (process.env.SBS_STATE_DIR) return process.env.SBS_STATE_DIR;
+  if (fs.existsSync('/opt/sparrowx')) return '/opt/sparrowx';
   if (fs.existsSync('/opt/detroit-sbs')) return '/opt/detroit-sbs';
   return path.join(__dirname, 'state');
 }
 
 function getTunnelStatePath() {
-  return process.env.SBS_TUNNEL_STATE_PATH || path.join(getTunnelStateDir(), 'tunnels.json');
+  return envCompat('SPARROWX_TUNNEL_STATE_PATH', 'SBS_TUNNEL_STATE_PATH', path.join(getTunnelStateDir(), 'tunnels.json'));
 }
 
 function ensureStateStorage() {
@@ -108,7 +118,7 @@ function saveTunnelState(state) {
 }
 
 function tunnelNameForAgent(agentId) {
-  return `sbs_${String(agentId || '').substring(0, 8)}`;
+  return `spx_${String(agentId || '').substring(0, 8)}`;
 }
 
 function getTunnelConfig(agentId) {

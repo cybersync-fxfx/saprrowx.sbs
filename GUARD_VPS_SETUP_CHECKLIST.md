@@ -1,6 +1,6 @@
-# Detroit SBS Guard VPS Setup Checklist
+# Sparrowx Guard VPS Setup Checklist
 
-This is the one-time setup checklist for a fresh Detroit SBS guard VPS.
+This is the one-time setup checklist for a fresh Sparrowx guard VPS.
 
 Current known values:
 
@@ -8,7 +8,7 @@ Current known values:
 - Guard public IP: `43.228.212.54`
 - App path: `/opt/sbs`
 - Backend port: `3001`
-- PM2 app name: `sbs-panel`
+- PM2 app name: `sparrowx-panel`
 
 Important reality for the current build:
 
@@ -118,7 +118,7 @@ You need these values from Supabase:
 - `SUPABASE_ANON_KEY` or publishable key
 - `SUPABASE_SERVICE_KEY` / `SUPABASE_SERVICE_ROLE_KEY`
 
-Keep the Supabase service role/secret key only on the central SBS panel/guard server. Do not give it to customer/client servers. Agents and protected VPS machines should only receive their generated `SBS_AGENT_ID` and `SBS_API_KEY`.
+Keep the Supabase service role/secret key only on the central Sparrowx panel/guard server. Do not give it to customer/client servers. Agents and protected VPS machines should only receive their generated `SPARROWX_AGENT_ID` and `SPARROWX_API_KEY`.
 
 ## 8. Create the Server .env
 
@@ -149,7 +149,7 @@ https://sbs.detriot.host
 
 ```bash
 cd /opt/sbs
-pm2 start server.js --name sbs-panel
+pm2 start server.js --name sparrowx-panel
 pm2 save
 pm2 startup
 ```
@@ -158,7 +158,7 @@ Check:
 
 ```bash
 pm2 list
-pm2 logs sbs-panel --lines 50
+pm2 logs sparrowx-panel --lines 50
 ```
 
 Healthy log should show:
@@ -239,7 +239,7 @@ This prepares:
 - IP forwarding
 - relaxed `rp_filter`
 - nftables
-- `/opt/detroit-sbs/tunnel-manager.sh`
+- `/opt/sparrowx/tunnel-manager.sh`
 
 Then verify:
 
@@ -247,7 +247,7 @@ Then verify:
 sysctl net.ipv4.ip_forward
 sysctl net.ipv4.conf.all.rp_filter
 nft list ruleset
-ls -l /opt/detroit-sbs/tunnel-manager.sh
+ls -l /opt/sparrowx/tunnel-manager.sh
 ```
 
 Expected:
@@ -290,7 +290,7 @@ The agent does not use the login page itself. It uses:
 So the public installer value must be:
 
 ```text
-SBS_SERVER=https://sbs.detriot.host
+SPARROWX_SERVER=https://sbs.detriot.host
 ```
 
 ## 15. Download and Test a Fresh Installer
@@ -305,7 +305,7 @@ In the panel:
 On the client server:
 
 ```bash
-sudo bash sbs-agent-<agent-id>.sh
+sudo bash sparrowx-agent-<agent-id>.sh
 ```
 
 Then check the client:
@@ -320,18 +320,20 @@ sudo cat /opt/sbs-agent/.env
 The client `.env` should show:
 
 ```env
-SBS_SERVER=https://sbs.detriot.host
-SBS_AGENT_ID=...
-SBS_API_KEY=...
-SBS_ENABLE_TUNNEL=0
+SPARROWX_SERVER=https://sbs.detriot.host
+SPARROWX_AGENT_ID=...
+SPARROWX_API_KEY=...
+SPARROWX_ENABLE_TUNNEL=1
 ```
+
+The installer also writes legacy `SBS_*` aliases, and the systemd service still uses `sbs-agent` so existing installed clients can auto-update without a service migration.
 
 ## 16. Confirm the Panel Sees the Agent
 
 On the guard VPS:
 
 ```bash
-pm2 logs sbs-panel --lines 100
+pm2 logs sparrowx-panel --lines 100
 ```
 
 You want to see:
@@ -346,7 +348,7 @@ On guard:
 
 ```bash
 curl -I https://sbs.detriot.host/api/health
-pm2 logs sbs-panel --lines 100
+pm2 logs sparrowx-panel --lines 100
 ```
 
 On client:
@@ -397,8 +399,8 @@ cd /opt/sbs/frontend
 npm install
 npm run build
 cd /opt/sbs
-pm2 restart sbs-panel
-pm2 logs sbs-panel --lines 50
+pm2 restart sparrowx-panel
+pm2 logs sparrowx-panel --lines 50
 ```
 
 ## 20. One-Line Summary

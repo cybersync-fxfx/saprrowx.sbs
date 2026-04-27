@@ -14,11 +14,11 @@ import Settings  from './pages/Settings';
 import ThreatRadar from './pages/ThreatRadar';
 
 function App() {
-  const [token,   setToken]   = useState(localStorage.getItem('sbs_token'));
+  const [token,   setToken]   = useState(localStorage.getItem('sparrowx_token') || localStorage.getItem('sbs_token'));
   const [user,    setUser]    = useState(null);
   const [loading, setLoading] = useState(true);
 
-  // ── Fetch /api/me ─────────────────────────────────────────────────────────
+  // -- Fetch /api/me ---------------------------------------------------------
   const fetchMe = useCallback((tk) => {
     fetch('/api/me', { headers: { Authorization: `Bearer ${tk}` } })
       .then(res => {
@@ -27,6 +27,7 @@ function App() {
       })
       .then(data => setUser(data))
       .catch(() => {
+        localStorage.removeItem('sparrowx_token');
         localStorage.removeItem('sbs_token');
         setToken(null);
         setUser(null);
@@ -43,6 +44,7 @@ function App() {
         })
         .then(data => { setUser(data); setLoading(false); })
         .catch(() => {
+          localStorage.removeItem('sparrowx_token');
           localStorage.removeItem('sbs_token');
           setToken(null);
           setLoading(false);
@@ -61,7 +63,8 @@ function App() {
 
   const handleSetToken = (t) => {
     setToken(t);
-    localStorage.setItem('sbs_token', t);
+    localStorage.setItem('sparrowx_token', t);
+    localStorage.removeItem('sbs_token');
   };
 
   if (loading) {

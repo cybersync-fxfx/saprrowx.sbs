@@ -1,7 +1,7 @@
 {
-  "name": "sbs.detriot",
+  "name": "sparrowx",
   "version": "1.0.0",
-  "description": "",
+  "description": "Sparrowx autonomous infrastructure security panel",
   "main": "index.js",
   "scripts": {
     "start": "node server.js",

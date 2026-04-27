@@ -15,9 +15,9 @@ export default function Landing() {
         <div className="brand-header">
           {/* Logo redirects to login */}
           <div onClick={() => navigate('/login')} style={{ display: 'inline-block', cursor: 'pointer' }}>
-            <img src="/logo.png" alt="SBS Logo" style={{ width: '72px', height: '72px', objectFit: 'contain' }} />
+            <img src="/logo.png" alt="Sparrowx Logo" style={{ width: '72px', height: '72px', objectFit: 'contain' }} />
           </div>
-          <h1 className="brand-title">SBS Platform</h1>
+          <h1 className="brand-title">Sparrowx Platform</h1>
           <p className="brand-subtitle">Next-Generation Infrastructure Security</p>
         </div>
 

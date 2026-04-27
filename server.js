@@ -7,7 +7,7 @@ if (!fs.existsSync(path.join(__dirname, 'node_modules'))) {
   console.log('\x1b[33m[!] Dependencies not found. Installing automatically...\x1b[0m');
   try {
     execSync('npm install', { stdio: 'inherit' });
-    console.log('\x1b[32m[✓] Dependencies installed successfully.\x1b[0m\n');
+    console.log('\x1b[32m[ok] Dependencies installed successfully.\x1b[0m\n');
   } catch (err) {
     console.error('\x1b[31m[x] Failed to install dependencies. Please run npm install manually.\x1b[0m');
     process.exit(1);
@@ -51,6 +51,15 @@ const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY;
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY; // Needed for admin operations
 const ADMIN_FEATURES_ENABLED = Boolean(SUPABASE_SERVICE_KEY);
+const PRODUCT_NAME = 'Sparrowx';
+
+function envCompat(primaryName, legacyName, fallback = '') {
+  const primary = process.env[primaryName];
+  if (primary !== undefined && primary !== '') return primary;
+  const legacy = process.env[legacyName];
+  if (legacy !== undefined && legacy !== '') return legacy;
+  return fallback;
+}
 
 if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
   console.error("\x1b[31m[x] Error: Missing SUPABASE_URL or SUPABASE_ANON_KEY in .env\x1b[0m");
@@ -212,13 +221,13 @@ const ipv4Pattern = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\
 const CLIENT_TUNNEL_SCRIPT_SOURCE = fs
   .readFileSync(path.join(__dirname, 'agent', 'setup-tunnel-client.sh'), 'utf8')
   .replace(/\r\n/g, '\n');
-const AGENT_BUNDLE_VERSION = '2026-04-27-self-update-1';
+const AGENT_BUNDLE_VERSION = '2026-04-27-sparrowx-1';
 const AGENT_UPDATE_SCRIPT_SOURCE = fs
   .readFileSync(path.join(__dirname, 'agent', 'sbs-agent.sh'), 'utf8')
   .replace(/\r\n/g, '\n');
 
 const CLIENT_TUNNEL_SERVICE_UNIT = `[Unit]
-Description=SBS Client WireGuard Tunnel
+Description=Sparrowx Client WireGuard Tunnel
 After=network-online.target
 Wants=network-online.target
 
@@ -312,11 +321,11 @@ function parseEnv(file) {
 }
 
 const env = parseEnv('/opt/sbs-agent/.env');
-let server = env.SBS_SERVER;
-const agentId = env.SBS_AGENT_ID;
-const apiKey = env.SBS_API_KEY;
+let server = env.SPARROWX_SERVER || env.SBS_SERVER;
+const agentId = env.SPARROWX_AGENT_ID || env.SBS_AGENT_ID;
+const apiKey = env.SPARROWX_API_KEY || env.SBS_API_KEY;
 if (!server || !agentId || !apiKey) {
-  throw new Error('Missing SBS agent environment.');
+  throw new Error('Missing Sparrowx agent environment.');
 }
 
 function post(path, data, cb, hops = 0) {
@@ -328,7 +337,7 @@ function post(path, data, cb, hops = 0) {
     headers: {
       'Content-Type': 'application/json',
       'Content-Length': Buffer.byteLength(body),
-      'User-Agent': 'sbs-agent-bootstrap-updater/1.0'
+      'User-Agent': 'sparrowx-agent-bootstrap-updater/1.0'
     }
   }, (res) => {
     let payload = '';
@@ -356,7 +365,7 @@ post('/api/agent/self-update-script', { agentId, apiKey }, (err, script) => {
   exec('nohup bash /opt/sbs-agent/.sbs-agent-update.sh --self-update >> /var/log/sbs/agent-update.log 2>&1 &', {
     shell: '/bin/bash'
   }, () => {});
-  console.log('SBS agent self-update staged.');
+  console.log('Sparrowx agent self-update staged.');
 });
 NODE`;
 
@@ -373,7 +382,7 @@ const queueAgentSelfUpdateIfNeeded = (agentId, observedBuild, userId) => {
 
   queueAgentCommand(agentId, buildAgentSelfUpdateCommand(), {
     kind: 'agent:self-update',
-    summary: `Auto-update SBS agent to ${AGENT_BUNDLE_VERSION}`,
+    summary: `Auto-update ${PRODUCT_NAME} agent to ${AGENT_BUNDLE_VERSION}`,
   });
   agentAutoUpdateAttempts.set(agentId, { build: AGENT_BUNDLE_VERSION, at: Date.now() });
   appendClientLog(agentId, {
@@ -462,7 +471,7 @@ const generateWgKeys = () => {
 };
 
 const buildClientTunnelBootstrapCommand = (tunnelConfig) => {
-  const protectedCidrs = String(process.env.SBS_PROTECTED_CIDRS || '').trim();
+  const protectedCidrs = String(envCompat('SPARROWX_PROTECTED_CIDRS', 'SBS_PROTECTED_CIDRS', '')).trim();
 
   return `
 mkdir -p /opt/sbs-agent /var/log/sbs
@@ -472,6 +481,15 @@ ${CLIENT_TUNNEL_SCRIPT_SOURCE}
 TUNNEL_SCRIPT_EOF
 chmod +x /opt/sbs-agent/setup-tunnel-client.sh
 cat <<'TUNNEL_ENV_EOF' > /opt/sbs-agent/tunnel.env
+SPARROWX_TUNNEL_NAME=${tunnelConfig.tunnelName}
+SPARROWX_GUARD_PUBLIC_IP=${tunnelConfig.guardPublicIp}
+SPARROWX_GUARD_TUNNEL_IP=${tunnelConfig.guardTunnelIp}
+SPARROWX_CLIENT_TUNNEL_IP=${tunnelConfig.clientTunnelIp}
+SPARROWX_TUNNEL_CIDR=${tunnelConfig.tunnelCidr || 30}
+SPARROWX_PROTECTED_CIDRS=${protectedCidrs}
+SPARROWX_CLIENT_PRIVATE_KEY=${tunnelConfig.clientPrivateKey}
+SPARROWX_GUARD_PUBLIC_KEY=${tunnelConfig.guardPublicKey}
+SPARROWX_GUARD_PORT=${tunnelConfig.listenPort || 51820}
 SBS_TUNNEL_NAME=${tunnelConfig.tunnelName}
 SBS_GUARD_PUBLIC_IP=${tunnelConfig.guardPublicIp}
 SBS_GUARD_TUNNEL_IP=${tunnelConfig.guardTunnelIp}
@@ -515,6 +533,7 @@ function detectGuardFirewallTable() {
   const candidates = [
     { family: 'inet', table: 'detroit_guard' },
     { family: 'inet', table: 'sbs_filter' },
+    { family: 'inet', table: 'sparrowx_guard' },
   ];
 
   for (const candidate of candidates) {
@@ -786,7 +805,7 @@ app.get('/api/me', authMiddleware, (req, res) => {
 });
 
 app.post('/api/me/regenerate-key', authMiddleware, privilegedSupabaseMiddleware, async (req, res) => {
-  const newKey = 'sbs_' + crypto.randomBytes(16).toString('hex');
+  const newKey = 'spx_' + crypto.randomBytes(16).toString('hex');
   const { error } = await supabaseAdmin
     .from('user_profiles')
     .update({ api_key: newKey })
@@ -890,7 +909,7 @@ elif [[ "$osType" == "debian" ]]; then
 fi`;
 
   const script = `#!/bin/bash
-# SBS Agent Installer
+# Sparrowx Agent Installer
 if [ "$EUID" -ne 0 ]; then
   echo "Please run as root"
   exit 1
@@ -947,10 +966,10 @@ function getCpuUsage() {
 let lastCpu = getCpuUsage();
 
 const config = {
-  server: process.env.SBS_SERVER,
-  agentId: process.env.SBS_AGENT_ID,
-  apiKey: process.env.SBS_API_KEY,
-  enableTunnel: process.env.SBS_ENABLE_TUNNEL === '1'
+  server: process.env.SPARROWX_SERVER || process.env.SBS_SERVER,
+  agentId: process.env.SPARROWX_AGENT_ID || process.env.SBS_AGENT_ID,
+  apiKey: process.env.SPARROWX_API_KEY || process.env.SBS_API_KEY,
+  enableTunnel: (process.env.SPARROWX_ENABLE_TUNNEL || process.env.SBS_ENABLE_TUNNEL) === '1'
 };
 
 const AGENT_BUNDLE_VERSION = '${AGENT_BUNDLE_VERSION}';
@@ -987,7 +1006,7 @@ function makeRequest(path, method, data, callback, redirectCount = 0) {
     method,
     headers: {
       'Content-Type': 'application/json',
-      'User-Agent': 'sbs-agent/1.0'
+      'User-Agent': 'sparrowx-agent/1.0'
     }
   };
   const req = reqModule.request(url, options, (res) => {
@@ -1369,12 +1388,12 @@ function sendStats() {
       "ss -ant | wc -l; " +
       "ss -ant | grep ESTAB | wc -l; " +
       "ss -ant | grep SYN-RECV | wc -l; " +
-      "NFT_TABLE=$(nft list table inet detroit_guard >/dev/null 2>&1 && echo 'inet detroit_guard' || echo 'inet sbs_filter'); " +
+      "NFT_TABLE=$(nft list table inet detroit_guard >/dev/null 2>&1 && echo 'inet detroit_guard' || (nft list table inet sbs_filter >/dev/null 2>&1 && echo 'inet sbs_filter' || echo 'inet sparrowx_guard')); " +
       "nft list set $NFT_TABLE blacklist 2>/dev/null | grep -oE '([0-9]{1,3}\\.){3}[0-9]{1,3}' | wc -l; " +
       "free | grep Mem | awk '{print $3/$2 * 100}'; " +
       "cat /proc/uptime | awk '{print $1}'; " +
       "ss -anu | wc -l; " +
-      // SSH events — accepted / failed / invalid from auth.log
+      // SSH events - accepted / failed / invalid from auth.log
       "grep -E 'Accepted|Failed|Invalid|Disconnected' /var/log/auth.log 2>/dev/null | tail -n 20 || " +
       "grep -E 'Accepted|Failed|Invalid|Disconnected' /var/log/secure 2>/dev/null | tail -n 20 || echo ''; " +
       // Attack log
@@ -1401,7 +1420,18 @@ function sendStats() {
           ...attackLines.filter(l => l.trim()).map(l => '[FW]  ' + l.trim()),
         ].join('\\n');
         
-        const tunnelName = 'sbs_' + String(config.agentId || '').substring(0, 8);
+        const defaultTunnelName = 'spx_' + String(config.agentId || '').substring(0, 8);
+        const legacyTunnelName = 'sbs_' + String(config.agentId || '').substring(0, 8);
+        let tunnelName = defaultTunnelName;
+        try {
+          const tunnelEnv = fs.readFileSync('/opt/sbs-agent/tunnel.env', 'utf8');
+          const match = tunnelEnv.match(/^(?:SPARROWX_TUNNEL_NAME|SBS_TUNNEL_NAME)=(.+)$/m);
+          if (match && match[1]) tunnelName = match[1].trim();
+        } catch (_) {
+          if (!fs.existsSync('/sys/class/net/' + defaultTunnelName) && fs.existsSync('/sys/class/net/' + legacyTunnelName)) {
+            tunnelName = legacyTunnelName;
+          }
+        }
         const tunnelPresent = fs.existsSync('/sys/class/net/' + tunnelName);
         if (tunnelPresent) tunnelRegistered = true;
 
@@ -1481,6 +1511,10 @@ setInterval(checkSelfUpdate, SELF_UPDATE_INTERVAL_MS);
 AGENT_JS_EOF
 
 cat << ENV_EOF > /opt/sbs-agent/.env
+SPARROWX_SERVER=${serverUrl}
+SPARROWX_AGENT_ID=${req.user.agent_id}
+SPARROWX_API_KEY=${req.user.api_key}
+SPARROWX_ENABLE_TUNNEL=1
 SBS_SERVER=${serverUrl}
 SBS_AGENT_ID=${req.user.agent_id}
 SBS_API_KEY=${req.user.api_key}
@@ -1529,7 +1563,7 @@ systemctl restart nftables
 
 cat << 'AGENT_SVC_EOF' > /etc/systemd/system/sbs-agent.service
 [Unit]
-Description=SBS Agent
+Description=Sparrowx Agent
 After=network.target
 
 [Service]
@@ -1562,12 +1596,12 @@ else
 fi
 
 echo "=============================================="
-echo "  SBS Agent installation complete! ✓"
+echo "  Sparrowx Agent installation complete! ok"
 echo "  Agent ID: ${req.user.agent_id}"
 echo "=============================================="
 `;
   res.setHeader('Content-Type', 'text/x-shellscript');
-  res.setHeader('Content-Disposition', `attachment; filename="sbs-agent-${req.user.agent_id}.sh"`);
+  res.setHeader('Content-Disposition', `attachment; filename="sparrowx-agent-${req.user.agent_id}.sh"`);
   res.send(script);
 });
 
@@ -1870,19 +1904,21 @@ async function setupTunnel(req, res, agentId, clientIp, options = {}) {
 }
 
 function getTunnelInterfaceName(agentId) {
-  return tunnelNameForAgent(agentId);
+  const tunnelConfig = getTunnelConfig(agentId);
+  return tunnelConfig?.tunnelName || tunnelNameForAgent(agentId);
 }
 
 function runTunnelManager(action, tunnelConfig) {
   const { execFileSync } = require('child_process');
   const candidates = [
+    '/opt/sparrowx/tunnel-manager.sh',
+    path.join(__dirname, 'tunnel-manager.sh'),
     '/opt/detroit-sbs/tunnel-manager.sh',
-    path.join(__dirname, 'tunnel-manager.sh')
   ];
   const scriptPath = candidates.find((candidate) => fs.existsSync(candidate));
 
   if (!scriptPath) {
-    throw new Error('Tunnel manager script not found. Expected /opt/detroit-sbs/tunnel-manager.sh or local tunnel-manager.sh.');
+    throw new Error('Tunnel manager script not found. Expected /opt/sparrowx/tunnel-manager.sh, /opt/detroit-sbs/tunnel-manager.sh, or local tunnel-manager.sh.');
   }
 
   const bashArgs = [
@@ -1894,6 +1930,7 @@ function runTunnelManager(action, tunnelConfig) {
     tunnelConfig?.guardTunnelIp || '',
     tunnelConfig?.clientTunnelIp || '',
     String(tunnelConfig?.listenPort || ''),
+    tunnelConfig?.tunnelName || '',
   ];
 
   const isRoot = typeof process.getuid === 'function' ? process.getuid() === 0 : false;
@@ -1903,6 +1940,8 @@ function runTunnelManager(action, tunnelConfig) {
   // Pass keys via env for security
   const env = { 
     ...process.env,
+    SPARROWX_GUARD_PRIVATE_KEY: tunnelConfig?.guardPrivateKey,
+    SPARROWX_CLIENT_PUBLIC_KEY: tunnelConfig?.clientPublicKey,
     SBS_GUARD_PRIVATE_KEY: tunnelConfig?.guardPrivateKey,
     SBS_CLIENT_PUBLIC_KEY: tunnelConfig?.clientPublicKey
   };
@@ -2078,13 +2117,13 @@ app.delete('/api/agent/tunnel/remove', authMiddleware, privilegedSupabaseMiddlew
     }
   });
 
-// ── Global Blocklist Sync ────────────────────────────────────
+// -- Global Blocklist Sync ------------------------------------
 function broadcastGlobalBan(ip) {
   // Broadcast to all connected agents
   Object.keys(db.agents).forEach(agentId => {
     queueAgentCommand(
       agentId,
-      `NFT_TABLE=$(nft list table inet detroit_guard >/dev/null 2>&1 && echo detroit_guard || echo sbs_filter); nft add element inet $NFT_TABLE blacklist '{ ${ip} }' 2>/dev/null || true`,
+      `NFT_TABLE=$(nft list table inet detroit_guard >/dev/null 2>&1 && echo detroit_guard || (nft list table inet sbs_filter >/dev/null 2>&1 && echo sbs_filter || echo sparrowx_guard)); nft add element inet $NFT_TABLE blacklist '{ ${ip} }' 2>/dev/null || true`,
       { kind: 'firewall:ban', summary: `Block ${ip} on client firewall` }
     );
   });
@@ -2095,7 +2134,7 @@ function broadcastGlobalUnban(ip) {
   Object.keys(db.agents).forEach(agentId => {
     queueAgentCommand(
       agentId,
-      `NFT_TABLE=$(nft list table inet detroit_guard >/dev/null 2>&1 && echo detroit_guard || echo sbs_filter); nft delete element inet $NFT_TABLE blacklist '{ ${ip} }' 2>/dev/null || true`,
+      `NFT_TABLE=$(nft list table inet detroit_guard >/dev/null 2>&1 && echo detroit_guard || (nft list table inet sbs_filter >/dev/null 2>&1 && echo sbs_filter || echo sparrowx_guard)); nft delete element inet $NFT_TABLE blacklist '{ ${ip} }' 2>/dev/null || true`,
       { kind: 'firewall:unban', summary: `Unblock ${ip} on client firewall` }
     );
   });
@@ -2117,7 +2156,7 @@ async function applyRadarAutoBan(ip, reason, metrics = {}) {
   });
 }
 
-// ── Radar Scanner Integration ────────────────────────────────
+// -- Radar Scanner Integration --------------------------------
 const RadarScanner = require('./radar-scanner');
 radar = new RadarScanner(supabaseAdmin, {
   broadcastToUser,
@@ -2199,7 +2238,7 @@ function getRadarModePatch(mode) {
   return null;
 }
 
-// ── Websocket logic ──────────────────────────────────────────
+// -- Websocket logic ------------------------------------------
 const clients = {}; // { userId: [ws1, ws2] }
 
 wss.on('connection', async (ws, req) => {
@@ -2256,7 +2295,7 @@ function broadcastToAll(message) {
   });
 }
 
-// ── Agent Heartbeat Checker ──────────────────────────────────
+// -- Agent Heartbeat Checker ----------------------------------
 setInterval(() => {
   const now = Date.now();
   for (const [agentId, agent] of Object.entries(db.agents)) {
@@ -2423,5 +2462,5 @@ app.use((req, res) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`\x1b[32m[✓] SBS Detroit Server listening on port ${PORT}\x1b[0m`);
+  console.log(`\x1b[32m[ok] ${PRODUCT_NAME} server listening on port ${PORT}\x1b[0m`);
 });

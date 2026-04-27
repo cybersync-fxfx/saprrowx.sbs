@@ -1,4 +1,4 @@
--- Detroit SBS Phase 3: Threat Radar Table
+-- Sparrowx Phase 3: Threat Radar Table
 create table if not exists public.threat_radar (
   id uuid default gen_random_uuid() primary key,
   ip text not null,

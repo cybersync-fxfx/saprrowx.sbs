@@ -77,9 +77,9 @@ export default function Auth({ setToken }) {
         display: 'flex', justifyContent: 'space-between', alignItems: 'center'
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
-          <img src="/logo.png" alt="SBS" style={{ width: '36px', height: '36px', objectFit: 'contain' }} />
+          <img src="/logo.png" alt="Sparrowx" style={{ width: '36px', height: '36px', objectFit: 'contain' }} />
           <span style={{ fontFamily: 'var(--font-display)', fontSize: '1.5rem', fontWeight: '800', letterSpacing: '-0.5px' }}>
-            SBS <span style={{ color: 'var(--text-muted)', fontWeight: '400' }}>Platform</span>
+            Sparrowx <span style={{ color: 'var(--text-muted)', fontWeight: '400' }}>Platform</span>
           </span>
         </div>
         <div style={{ display: 'flex', gap: '30px', alignItems: 'center' }}>
@@ -168,7 +168,7 @@ export default function Auth({ setToken }) {
             <div style={{ textAlign: 'center', marginBottom: '80px' }}>
               <h2 style={{ fontSize: '3rem', marginBottom: '20px' }}>Comprehensive <span className="text-cyan">Protection</span></h2>
               <p style={{ color: 'var(--text-muted)', fontSize: '1.2rem', maxWidth: '700px', margin: '0 auto' }}>
-                Our Server Based Security platform delivers enterprise-grade tools to secure your Linux environments from malicious traffic and unauthorized access.
+                Sparrowx delivers enterprise-grade tools to secure your Linux environments from malicious traffic and unauthorized access.
               </p>
             </div>
 
@@ -180,7 +180,7 @@ export default function Auth({ setToken }) {
                 </div>
                 <h3 style={{ fontSize: '1.4rem', marginBottom: '15px' }}>Instant Mitigation</h3>
                 <p style={{ color: 'var(--text-muted)', lineHeight: '1.6' }}>
-                  Detects network anomalies instantly. Automatically blocks malicious IPs before they impact your services — all within milliseconds.
+                  Detects network anomalies instantly. Automatically blocks malicious IPs before they impact your services - all within milliseconds.
                 </p>
               </div>
 
@@ -222,7 +222,7 @@ export default function Auth({ setToken }) {
                     <Server size={24} color="var(--text-main)" />
                   </div>
                   <div>
-                    <h4 style={{ fontSize: '1.2rem', marginBottom: '10px' }}>The SBS Agent</h4>
+                    <h4 style={{ fontSize: '1.2rem', marginBottom: '10px' }}>The Sparrowx Agent</h4>
                     <p style={{ color: 'var(--text-muted)', lineHeight: '1.6' }}>A lightweight protection agent installed on your server, filtering malicious traffic in real time with near-zero overhead.</p>
                   </div>
                 </div>
@@ -257,7 +257,7 @@ export default function Auth({ setToken }) {
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '15px', fontFamily: 'var(--font-mono)' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', padding: '15px', background: 'rgba(0,0,0,0.5)', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.05)' }}>
                     <span style={{ color: 'var(--text-muted)' }}>Status</span>
-                    <span style={{ color: 'var(--success-green)' }}>● SECURE</span>
+                    <span style={{ color: 'var(--success-green)' }}>* SECURE</span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', padding: '15px', background: 'rgba(0,0,0,0.5)', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.05)' }}>
                     <span style={{ color: 'var(--text-muted)' }}>Active Connections</span>
@@ -283,10 +283,10 @@ export default function Auth({ setToken }) {
       <footer style={{ borderTop: '1px solid rgba(255,255,255,0.05)', padding: '40px', background: 'rgba(3, 5, 8, 0.9)', textAlign: 'center', position: 'relative', zIndex: 10 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px', marginBottom: '20px' }}>
           <Shield size={24} color="var(--text-muted)" />
-          <span style={{ fontFamily: 'var(--font-display)', fontSize: '1.2rem', fontWeight: '800', color: 'var(--text-muted)' }}>SBS</span>
+          <span style={{ fontFamily: 'var(--font-display)', fontSize: '1.2rem', fontWeight: '800', color: 'var(--text-muted)' }}>Sparrowx</span>
         </div>
         <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>
-          © {new Date().getFullYear()} Server Based Security. All rights reserved.
+          (c) {new Date().getFullYear()} Sparrowx. All rights reserved.
         </p>
       </footer>
     </div>

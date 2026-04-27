@@ -3,31 +3,39 @@ const fs = require('fs');
 const path = require('path');
 const { getTunnelStateDir, listTunnelConfigs } = require('./tunnel-config');
 
-const DEFAULT_SCAN_INTERVAL_MS = Number(process.env.SBS_RADAR_SCAN_INTERVAL_MS || 1000);
+function envCompat(primaryName, legacyName, fallback = '') {
+  const primary = process.env[primaryName];
+  if (primary !== undefined && primary !== '') return primary;
+  const legacy = process.env[legacyName];
+  if (legacy !== undefined && legacy !== '') return legacy;
+  return fallback;
+}
+
+const DEFAULT_SCAN_INTERVAL_MS = Number(envCompat('SPARROWX_RADAR_SCAN_INTERVAL_MS', 'SBS_RADAR_SCAN_INTERVAL_MS', 1000));
 const DEFAULT_CONFIG = {
-  mode: String(process.env.SBS_RADAR_MODE || 'normal').trim().toLowerCase(),
-  enabled: process.env.SBS_RADAR_ENABLED !== '0',
-  autoBan: process.env.SBS_RADAR_AUTO_BAN !== '0',
-  threshold: Number(process.env.SBS_RADAR_BAN_THRESHOLD || 90),
-  watchThreshold: Number(process.env.SBS_RADAR_WATCH_THRESHOLD || 55),
-  connWarn: Number(process.env.SBS_RADAR_CONN_WARN || 80),
-  connBan: Number(process.env.SBS_RADAR_CONN_BAN || 220),
-  synWarn: Number(process.env.SBS_RADAR_SYN_WARN || 30),
-  synBan: Number(process.env.SBS_RADAR_SYN_BAN || 90),
-  synRatioWarn: Number(process.env.SBS_RADAR_SYN_RATIO_WARN || 0.55),
-  synRatioBan: Number(process.env.SBS_RADAR_SYN_RATIO_BAN || 0.8),
-  udpWarn: Number(process.env.SBS_RADAR_UDP_WARN || 140),
-  udpBan: Number(process.env.SBS_RADAR_UDP_BAN || 360),
-  burstWarn: Number(process.env.SBS_RADAR_BURST_WARN || 60),
-  burstBan: Number(process.env.SBS_RADAR_BURST_BAN || 180),
-  portFanoutWarn: Number(process.env.SBS_RADAR_PORT_FANOUT_WARN || 6),
-  portFanoutBan: Number(process.env.SBS_RADAR_PORT_FANOUT_BAN || 12),
+  mode: String(envCompat('SPARROWX_RADAR_MODE', 'SBS_RADAR_MODE', 'normal')).trim().toLowerCase(),
+  enabled: envCompat('SPARROWX_RADAR_ENABLED', 'SBS_RADAR_ENABLED', '1') !== '0',
+  autoBan: envCompat('SPARROWX_RADAR_AUTO_BAN', 'SBS_RADAR_AUTO_BAN', '1') !== '0',
+  threshold: Number(envCompat('SPARROWX_RADAR_BAN_THRESHOLD', 'SBS_RADAR_BAN_THRESHOLD', 90)),
+  watchThreshold: Number(envCompat('SPARROWX_RADAR_WATCH_THRESHOLD', 'SBS_RADAR_WATCH_THRESHOLD', 55)),
+  connWarn: Number(envCompat('SPARROWX_RADAR_CONN_WARN', 'SBS_RADAR_CONN_WARN', 80)),
+  connBan: Number(envCompat('SPARROWX_RADAR_CONN_BAN', 'SBS_RADAR_CONN_BAN', 220)),
+  synWarn: Number(envCompat('SPARROWX_RADAR_SYN_WARN', 'SBS_RADAR_SYN_WARN', 30)),
+  synBan: Number(envCompat('SPARROWX_RADAR_SYN_BAN', 'SBS_RADAR_SYN_BAN', 90)),
+  synRatioWarn: Number(envCompat('SPARROWX_RADAR_SYN_RATIO_WARN', 'SBS_RADAR_SYN_RATIO_WARN', 0.55)),
+  synRatioBan: Number(envCompat('SPARROWX_RADAR_SYN_RATIO_BAN', 'SBS_RADAR_SYN_RATIO_BAN', 0.8)),
+  udpWarn: Number(envCompat('SPARROWX_RADAR_UDP_WARN', 'SBS_RADAR_UDP_WARN', 140)),
+  udpBan: Number(envCompat('SPARROWX_RADAR_UDP_BAN', 'SBS_RADAR_UDP_BAN', 360)),
+  burstWarn: Number(envCompat('SPARROWX_RADAR_BURST_WARN', 'SBS_RADAR_BURST_WARN', 60)),
+  burstBan: Number(envCompat('SPARROWX_RADAR_BURST_BAN', 'SBS_RADAR_BURST_BAN', 180)),
+  portFanoutWarn: Number(envCompat('SPARROWX_RADAR_PORT_FANOUT_WARN', 'SBS_RADAR_PORT_FANOUT_WARN', 6)),
+  portFanoutBan: Number(envCompat('SPARROWX_RADAR_PORT_FANOUT_BAN', 'SBS_RADAR_PORT_FANOUT_BAN', 12)),
   scanIntervalMs: DEFAULT_SCAN_INTERVAL_MS,
-  banCooldownMs: Number(process.env.SBS_RADAR_BAN_COOLDOWN_MS || 30 * 60 * 1000),
-  logCooldownMs: Number(process.env.SBS_RADAR_LOG_COOLDOWN_MS || 5 * 60 * 1000),
-  ignoredLocalPorts: parseIntegerList(process.env.SBS_RADAR_IGNORE_PORTS || '22,80,443,3001'),
-  whitelistCidrs: normalizeCidrs(process.env.SBS_RADAR_WHITELIST_CIDRS || '127.0.0.0/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,169.254.0.0/16,35.235.240.0/20'),
-  trustedProxyCidrs: normalizeCidrs(process.env.SBS_RADAR_TRUSTED_PROXY_CIDRS || ''),
+  banCooldownMs: Number(envCompat('SPARROWX_RADAR_BAN_COOLDOWN_MS', 'SBS_RADAR_BAN_COOLDOWN_MS', 30 * 60 * 1000)),
+  logCooldownMs: Number(envCompat('SPARROWX_RADAR_LOG_COOLDOWN_MS', 'SBS_RADAR_LOG_COOLDOWN_MS', 5 * 60 * 1000)),
+  ignoredLocalPorts: parseIntegerList(envCompat('SPARROWX_RADAR_IGNORE_PORTS', 'SBS_RADAR_IGNORE_PORTS', '22,80,443,3001')),
+  whitelistCidrs: normalizeCidrs(envCompat('SPARROWX_RADAR_WHITELIST_CIDRS', 'SBS_RADAR_WHITELIST_CIDRS', '127.0.0.0/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,169.254.0.0/16,35.235.240.0/20')),
+  trustedProxyCidrs: normalizeCidrs(envCompat('SPARROWX_RADAR_TRUSTED_PROXY_CIDRS', 'SBS_RADAR_TRUSTED_PROXY_CIDRS', '')),
 };
 
 const INTEL_DIR = path.join(__dirname, 'intel');
@@ -556,7 +564,7 @@ class RadarScanner {
       return;
     }
 
-    execSync(`nft add element inet detroit_guard blacklist { ${ip} } 2>/dev/null || true`);
+    execSync(`NFT_TABLE=$(nft list table inet detroit_guard >/dev/null 2>&1 && echo detroit_guard || (nft list table inet sbs_filter >/dev/null 2>&1 && echo sbs_filter || echo sparrowx_guard)); nft add element inet $NFT_TABLE blacklist { ${ip} } 2>/dev/null || true`);
   }
 }
 

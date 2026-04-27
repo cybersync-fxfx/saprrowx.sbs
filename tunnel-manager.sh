@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-# Detroit SBS — Guard Tunnel Manager (WireGuard + nftables)
+# Sparrowx Guard Tunnel Manager (WireGuard + nftables)
 ACTION="${1:-}"
 AGENT_ID="${2:-}"
 CLIENT_IP="${3:-}"
@@ -9,12 +9,13 @@ GUARD_IP="${4:-${GUARD_PUBLIC_IP:-}}"
 GUARD_INTERNAL_IP="${5:-}"
 CLIENT_INTERNAL_IP="${6:-}"
 LISTEN_PORT="${7:-51820}"
+REQUESTED_TUNNEL_NAME="${8:-}"
 
-TUNNEL_NAME="sbs_${AGENT_ID:0:8}"
+TUNNEL_NAME="${REQUESTED_TUNNEL_NAME:-${SPARROWX_TUNNEL_NAME:-${SBS_TUNNEL_NAME:-spx_${AGENT_ID:0:8}}}}"
 CONFIG_DIR="/etc/wireguard"
 CONFIG_FILE="${CONFIG_DIR}/${TUNNEL_NAME}.conf"
 
-# ── Helpers ───────────────────────────────────────────────────
+# -- Helpers ---------------------------------------------------
 log() {
   echo "[tunnel-manager] $1" >&2
 }
@@ -43,16 +44,16 @@ fi
 case $ACTION in
   add)
     if [ -z "$AGENT_ID" ] || [ -z "$CLIENT_IP" ] || [ -z "$GUARD_INTERNAL_IP" ] || [ -z "$CLIENT_INTERNAL_IP" ]; then
-      echo "Usage: $0 add <agent_id> <client_public_ip> <guard_public_ip> <guard_tunnel_ip> <client_tunnel_ip> [listen_port]" >&2
+      echo "Usage: $0 add <agent_id> <client_public_ip> <guard_public_ip> <guard_tunnel_ip> <client_tunnel_ip> [listen_port] [tunnel_name]" >&2
       exit 1
     fi
 
     # Retrieve keys from env
-    GUARD_PRIVATE_KEY="${SBS_GUARD_PRIVATE_KEY:-}"
-    CLIENT_PUBLIC_KEY="${SBS_CLIENT_PUBLIC_KEY:-}"
+    GUARD_PRIVATE_KEY="${SPARROWX_GUARD_PRIVATE_KEY:-${SBS_GUARD_PRIVATE_KEY:-}}"
+    CLIENT_PUBLIC_KEY="${SPARROWX_CLIENT_PUBLIC_KEY:-${SBS_CLIENT_PUBLIC_KEY:-}}"
 
     if [ -z "$GUARD_PRIVATE_KEY" ] || [ -z "$CLIENT_PUBLIC_KEY" ]; then
-      log "Error: WireGuard keys (SBS_GUARD_PRIVATE_KEY, SBS_CLIENT_PUBLIC_KEY) missing from environment."
+      log "Error: WireGuard keys (SPARROWX_GUARD_PRIVATE_KEY/SPARROWX_CLIENT_PUBLIC_KEY or legacy SBS_* aliases) missing from environment."
       exit 1
     fi
 

@@ -48,7 +48,7 @@ begin
   values (
     new.id,
     coalesce(new.raw_user_meta_data->>'username', 'user_' || substr(new.id::text, 1, 8)),
-    'sbs_' || md5(random()::text || clock_timestamp()::text),
+    'spx_' || md5(random()::text || clock_timestamp()::text),
     'agent_' || substring(md5(random()::text) from 1 for 12),
     case when is_first_user then 'admin' else 'user' end,
     case when is_first_user then 'approved' else 'pending' end

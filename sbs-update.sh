@@ -1,6 +1,6 @@
 #!/bin/bash
 # ============================================================
-#   Detroit SBS — Client Updater
+#   Sparrowx - Client Updater
 #   Run:  sudo bash sbs-update.sh
 # ============================================================
 
@@ -13,26 +13,26 @@ YELLOW='\033[1;33m'
 BOLD='\033[1m'
 RESET='\033[0m'
 
-# ── CONFIG ────────────────────────────────────────────────────
-# Change this to your actual SBS dashboard / CDN URL where the
+# -- CONFIG ----------------------------------------------------
+# Change this to your actual Sparrowx dashboard / CDN URL where the
 # latest agent bundle lives.
-SBS_UPDATE_URL="https://raw.githubusercontent.com/cybersync-fxfx/sbs.detriot/main/agent/sbs-agent.sh"
+SPARROWX_UPDATE_URL="https://raw.githubusercontent.com/cybersync-fxfx/sbs.detriot/main/agent/sbs-agent.sh"
 INSTALL_DIR="/opt/sbs-agent"
 AGENT_SCRIPT="$INSTALL_DIR/sbs-agent.sh"
 SERVICE_NAME="sbs-agent"
 BACKUP_DIR="$INSTALL_DIR/backups"
 VERSION_FILE="$INSTALL_DIR/.version"
-# ─────────────────────────────────────────────────────────────
+# -------------------------------------------------------------
 
 # Root check
 if [ "$EUID" -ne 0 ]; then
-  echo -e "${RED}[✗] Please run as root: sudo bash sbs-update.sh${RESET}"
+  echo -e "${RED}[x] Please run as root: sudo bash sbs-update.sh${RESET}"
   exit 1
 fi
 
 echo ""
 echo -e "${CYAN}${BOLD}============================================${RESET}"
-echo -e "${CYAN}${BOLD}    DETROIT SBS — Agent Updater v1.0        ${RESET}"
+echo -e "${CYAN}${BOLD}    SPARROWX - Agent Updater v1.0        ${RESET}"
 echo -e "${CYAN}${BOLD}============================================${RESET}"
 echo ""
 
@@ -44,40 +44,40 @@ fi
 echo -e "${YELLOW}[i] Current installed version: ${BOLD}$CURRENT_VERSION${RESET}"
 echo ""
 
-# ── STEP 1: Download latest agent ────────────────────────────
-echo -e "${CYAN}[1/4] Downloading latest SBS agent...${RESET}"
+# -- STEP 1: Download latest agent ----------------------------
+echo -e "${CYAN}[1/4] Downloading latest Sparrowx agent...${RESET}"
 TMP_FILE=$(mktemp /tmp/sbs-agent-XXXXXX.sh)
 
-if ! curl -fsSL "$SBS_UPDATE_URL" -o "$TMP_FILE"; then
-  echo -e "${RED}[✗] Failed to download update from:${RESET}"
-  echo -e "     $SBS_UPDATE_URL"
+if ! curl -fsSL "$SPARROWX_UPDATE_URL" -o "$TMP_FILE"; then
+  echo -e "${RED}[x] Failed to download update from:${RESET}"
+  echo -e "     $SPARROWX_UPDATE_URL"
   echo -e "${YELLOW}[!] Check your internet connection or the update URL.${RESET}"
   rm -f "$TMP_FILE"
   exit 1
 fi
 
-# Sanity check — make sure the download isn't an HTML error page
+# Sanity check - make sure the download isn't an HTML error page
 if grep -q "404: Not Found" "$TMP_FILE" 2>/dev/null; then
-  echo -e "${RED}[✗] Update URL returned 404. Check SBS_UPDATE_URL in this script.${RESET}"
+  echo -e "${RED}[x] Update URL returned 404. Check SPARROWX_UPDATE_URL in this script.${RESET}"
   rm -f "$TMP_FILE"
   exit 1
 fi
 
-echo -e "${GREEN}[✓] Download complete.${RESET}"
+echo -e "${GREEN}[ok] Download complete.${RESET}"
 
-# ── STEP 2: Backup current agent ─────────────────────────────
+# -- STEP 2: Backup current agent -----------------------------
 echo -e "${CYAN}[2/4] Backing up current agent...${RESET}"
 mkdir -p "$BACKUP_DIR"
 
 if [ -f "$AGENT_SCRIPT" ]; then
   BACKUP_PATH="$BACKUP_DIR/sbs-agent.$(date +%Y%m%d_%H%M%S).sh.bak"
   cp "$AGENT_SCRIPT" "$BACKUP_PATH"
-  echo -e "${GREEN}[✓] Backup saved → $BACKUP_PATH${RESET}"
+  echo -e "${GREEN}[ok] Backup saved -> $BACKUP_PATH${RESET}"
 else
-  echo -e "${YELLOW}[!] No existing agent found — fresh install.${RESET}"
+  echo -e "${YELLOW}[!] No existing agent found - fresh install.${RESET}"
 fi
 
-# ── STEP 3: Install new agent ────────────────────────────────
+# -- STEP 3: Install new agent --------------------------------
 echo -e "${CYAN}[3/4] Installing new agent...${RESET}"
 mkdir -p "$INSTALL_DIR"
 cp "$TMP_FILE" "$AGENT_SCRIPT"
@@ -88,21 +88,21 @@ rm -f "$TMP_FILE"
 NEW_VERSION=$(grep -m1 '^# VERSION:' "$AGENT_SCRIPT" | awk '{print $3}')
 if [ -n "$NEW_VERSION" ]; then
   echo "$NEW_VERSION" > "$VERSION_FILE"
-  echo -e "${GREEN}[✓] Installed version: ${BOLD}$NEW_VERSION${RESET}"
+  echo -e "${GREEN}[ok] Installed version: ${BOLD}$NEW_VERSION${RESET}"
 else
   echo -e "${YELLOW}[!] Could not detect version tag in agent script.${RESET}"
 fi
 
-# ── STEP 4: Restart agent service ────────────────────────────
-echo -e "${CYAN}[4/4] Restarting SBS agent service...${RESET}"
+# -- STEP 4: Restart agent service ----------------------------
+echo -e "${CYAN}[4/4] Restarting Sparrowx agent service...${RESET}"
 
 if systemctl list-units --type=service | grep -q "$SERVICE_NAME"; then
   systemctl restart "$SERVICE_NAME"
   sleep 2
   if systemctl is-active --quiet "$SERVICE_NAME"; then
-    echo -e "${GREEN}[✓] Service '${SERVICE_NAME}' is running.${RESET}"
+    echo -e "${GREEN}[ok] Service '${SERVICE_NAME}' is running.${RESET}"
   else
-    echo -e "${RED}[✗] Service '${SERVICE_NAME}' failed to start.${RESET}"
+    echo -e "${RED}[x] Service '${SERVICE_NAME}' failed to start.${RESET}"
     echo -e "${YELLOW}    Check logs: journalctl -u $SERVICE_NAME -n 50 --no-pager${RESET}"
     exit 1
   fi
@@ -113,7 +113,7 @@ fi
 
 echo ""
 echo -e "${GREEN}${BOLD}============================================${RESET}"
-echo -e "${GREEN}${BOLD}  Update complete! ✓                        ${RESET}"
-echo -e "${GREEN}${BOLD}  SBS Agent is up-to-date and running.      ${RESET}"
+echo -e "${GREEN}${BOLD}  Update complete! ok                        ${RESET}"
+echo -e "${GREEN}${BOLD}  Sparrowx Agent is up-to-date and running.      ${RESET}"
 echo -e "${GREEN}${BOLD}============================================${RESET}"
 echo ""

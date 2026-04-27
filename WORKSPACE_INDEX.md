@@ -4,7 +4,7 @@ Indexed on 2026-04-23.
 
 ## Overview
 
-This repository is now a broader Detroit SBS workspace rather than just a panel app.
+This repository is now a broader Sparrowx workspace rather than just a panel app.
 
 Current major pieces:
 

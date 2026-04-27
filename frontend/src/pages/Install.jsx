@@ -24,7 +24,7 @@ export default function Install({ token, user }) {
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `sbs-agent-${user.agentId}.sh`;
+      a.download = `sparrowx-agent-${user.agentId}.sh`;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -112,11 +112,11 @@ export default function Install({ token, user }) {
           <div className="stack-list">
             <div className="action-card">
               <span className="action-card-title">1. Upload the installer</span>
-              <span className="action-card-copy command-output">scp sbs-agent-{user?.agentId}.sh root@YOUR_SERVER_IP:/root/</span>
+              <span className="action-card-copy command-output">scp sparrowx-agent-{user?.agentId}.sh root@YOUR_SERVER_IP:/root/</span>
             </div>
             <div className="action-card">
               <span className="action-card-title">2. Run it as root</span>
-              <span className="action-card-copy command-output">sudo bash /root/sbs-agent-{user?.agentId}.sh</span>
+              <span className="action-card-copy command-output">sudo bash /root/sparrowx-agent-{user?.agentId}.sh</span>
             </div>
             <div className="action-card">
               <span className="action-card-title">3. Watch the dashboard</span>

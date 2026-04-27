@@ -15,6 +15,7 @@ export default function Layout({ user, setToken }) {
 
   const handleLogout = () => {
     setToken(null);
+    localStorage.removeItem('sparrowx_token');
     localStorage.removeItem('sbs_token');
     navigate('/');
   };
@@ -39,10 +40,10 @@ export default function Layout({ user, setToken }) {
     <div className="app-layout">
       <header className="topbar">
         <div className="brand-lockup">
-          <img src="/logo.png" alt="SBS Logo" className="brand-logo" />
+          <img src="/logo.png" alt="Sparrowx Logo" className="brand-logo" />
           <div>
-            <div className="brand-title">SBS</div>
-            <div className="brand-subtitle">Server Based Security</div>
+            <div className="brand-title">Sparrowx</div>
+            <div className="brand-subtitle">Autonomous Infrastructure Security</div>
           </div>
         </div>
 

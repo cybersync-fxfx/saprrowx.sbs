@@ -1,12 +1,12 @@
 #!/bin/bash
-# VERSION: 1.0.4
-# Detroit SBS — Agent Bootstrap / Self-Contained Installer
+# VERSION: 1.0.5
+# Sparrowx Agent Bootstrap / Self-Contained Installer
 # This file is the authoritative versioned agent.
-# Clients update by running:  sudo bash sbs-update.sh
+# Clients update automatically from the Sparrowx panel.
 
 set -e
 
-# ── Detect mode ───────────────────────────────────────────────
+# -- Detect mode -----------------------------------------------
 # If called with --install, performs a first-time install.
 # Otherwise it just replaces the agent binary and restarts the service.
 
@@ -23,13 +23,13 @@ BOLD='\033[1m'
 RESET='\033[0m'
 
 if [ "$EUID" -ne 0 ]; then
-  echo -e "${RED}[✗] Please run as root.${RESET}"
+  echo -e "${RED}[x] Please run as root.${RESET}"
   exit 1
 fi
 
-echo -e "${CYAN}${BOLD}[SBS] Detroit SBS Agent — version $(grep '^# VERSION:' "$0" | awk '{print $3}')${RESET}"
+echo -e "${CYAN}${BOLD}[Sparrowx] Agent version $(grep '^# VERSION:' "$0" | awk '{print $3}')${RESET}"
 
-# ── Write latest agent.js ─────────────────────────────────────
+# -- Write latest agent.js -------------------------------------
 mkdir -p "$INSTALL_DIR"
 mkdir -p /var/log/sbs
 touch /var/log/sbs/attacks.log /var/log/sbs/agent.log
@@ -41,7 +41,7 @@ const http = require('http');
 const https = require('https');
 const { exec, execSync } = require('child_process');
 
-// ── Helpers ───────────────────────────────────────────────────
+// -- Helpers ---------------------------------------------------
 function getCpuUsage() {
   const cpus = os.cpus();
   let user=0,nice=0,sys=0,idle=0,irq=0;
@@ -55,13 +55,13 @@ function getCpuUsage() {
 let lastCpu = getCpuUsage();
 
 const config = {
-  server:  process.env.SBS_SERVER,
-  agentId: process.env.SBS_AGENT_ID,
-  apiKey:  process.env.SBS_API_KEY,
-  enableTunnel: process.env.SBS_ENABLE_TUNNEL === '1'
+  server:  process.env.SPARROWX_SERVER || process.env.SBS_SERVER,
+  agentId: process.env.SPARROWX_AGENT_ID || process.env.SBS_AGENT_ID,
+  apiKey:  process.env.SPARROWX_API_KEY || process.env.SBS_API_KEY,
+  enableTunnel: (process.env.SPARROWX_ENABLE_TUNNEL || process.env.SBS_ENABLE_TUNNEL) === '1'
 };
 
-const AGENT_BUNDLE_VERSION = '2026-04-27-self-update-1';
+const AGENT_BUNDLE_VERSION = '2026-04-27-sparrowx-1';
 const TUNNEL_RETRY_MS = 60000;
 const SELF_UPDATE_INTERVAL_MS = 5 * 60 * 1000;
 let tunnelRegisterInFlight = false;
@@ -91,7 +91,7 @@ function request(path, method, data, cb, hops=0) {
   const mod = url.protocol==='https:' ? https : http;
   const req = mod.request(url, {
     method,
-    headers:{ 'Content-Type':'application/json','User-Agent':'sbs-agent/1.0.4' }
+    headers:{ 'Content-Type':'application/json','User-Agent':'sparrowx-agent/1.0.5' }
   }, res => {
     let body='';
     res.on('data', d => body+=d);
@@ -173,7 +173,7 @@ function registerTunnel(reason = 'register') {
   });
 }
 
-// ── Register ──────────────────────────────────────────────────
+// -- Register --------------------------------------------------
 function register() {
   request('/api/agent/register','POST',{
     agentId:  config.agentId,
@@ -195,7 +195,7 @@ function register() {
   });
 }
 
-// ── Network bytes ─────────────────────────────────────────────
+// -- Network bytes ---------------------------------------------
 let lastNet = { rx:0, tx:0, rxPackets:0, txPackets:0, ts:Date.now() };
 let cachedPrimaryIface = '';
 
@@ -418,7 +418,7 @@ function collectTrafficEvents(iface) {
   }
 }
 
-// ── Stats ─────────────────────────────────────────────────────
+// -- Stats -----------------------------------------------------
 const TELEMETRY_AGENT_BUILD = 'netdev-v2';
 
 function sendStats() {
@@ -470,7 +470,18 @@ function sendStats() {
           ...atkLines.filter(l=>l.trim()).map(l=>'[FW]  '+l.trim()),
         ].join('\n');
 
-        const tunnelName = 'sbs_' + String(config.agentId || '').substring(0, 8);
+        const defaultTunnelName = 'spx_' + String(config.agentId || '').substring(0, 8);
+        const legacyTunnelName = 'sbs_' + String(config.agentId || '').substring(0, 8);
+        let tunnelName = defaultTunnelName;
+        try {
+          const tunnelEnv = fs.readFileSync('/opt/sbs-agent/tunnel.env', 'utf8');
+          const match = tunnelEnv.match(/^(?:SPARROWX_TUNNEL_NAME|SBS_TUNNEL_NAME)=(.+)$/m);
+          if (match && match[1]) tunnelName = match[1].trim();
+        } catch (_) {
+          if (!fs.existsSync('/sys/class/net/' + defaultTunnelName) && fs.existsSync('/sys/class/net/' + legacyTunnelName)) {
+            tunnelName = legacyTunnelName;
+          }
+        }
         const tunnelPresent = fs.existsSync('/sys/class/net/' + tunnelName);
         if (tunnelPresent) tunnelRegistered = true;
 
@@ -515,7 +526,7 @@ function sendStats() {
   });
 }
 
-// ── Command poll ──────────────────────────────────────────────
+// -- Command poll ----------------------------------------------
 function pollCommands() {
   request('/api/agent/commands?agentId='+config.agentId+'&apiKey='+config.apiKey,'GET',null,(err,res)=>{
     if(err||!res) return;
@@ -540,7 +551,7 @@ function pollCommands() {
   });
 }
 
-// ── Boot ──────────────────────────────────────────────────────
+// -- Boot ------------------------------------------------------
 register();
 checkSelfUpdate();
 setInterval(register,     15000);
@@ -551,28 +562,32 @@ AGENT_EOF
 
 chmod 600 "$AGENT_BIN"
 
-echo -e "${GREEN}[✓] agent.js updated.${RESET}"
+echo -e "${GREEN}[ok] agent.js updated.${RESET}"
 
-# ── First-time install mode ───────────────────────────────────
+# -- First-time install mode -----------------------------------
 if [ "$1" = "--install" ]; then
-  echo -e "${CYAN}[SBS] First-time install mode...${RESET}"
+  echo -e "${CYAN}[Sparrowx] First-time install mode...${RESET}"
 
   # Prompt for required values
-  read -rp "SBS Server URL (e.g. https://your-server.com): " SBS_SERVER
-  read -rp "Agent ID: " SBS_AGENT_ID
-  read -rp "API Key: " SBS_API_KEY
+  read -rp "Sparrowx Server URL (e.g. https://your-server.com): " SPARROWX_SERVER
+  read -rp "Agent ID: " SPARROWX_AGENT_ID
+  read -rp "API Key: " SPARROWX_API_KEY
 
   cat > "$ENV_FILE" << EOF
-SBS_SERVER=$SBS_SERVER
-SBS_AGENT_ID=$SBS_AGENT_ID
-SBS_API_KEY=$SBS_API_KEY
+SPARROWX_SERVER=$SPARROWX_SERVER
+SPARROWX_AGENT_ID=$SPARROWX_AGENT_ID
+SPARROWX_API_KEY=$SPARROWX_API_KEY
+SPARROWX_ENABLE_TUNNEL=1
+SBS_SERVER=$SPARROWX_SERVER
+SBS_AGENT_ID=$SPARROWX_AGENT_ID
+SBS_API_KEY=$SPARROWX_API_KEY
 SBS_ENABLE_TUNNEL=1
 EOF
   chmod 600 "$ENV_FILE"
-  echo -e "${GREEN}[✓] .env written to $ENV_FILE${RESET}"
+  echo -e "${GREEN}[ok] .env written to $ENV_FILE${RESET}"
 
   # Install dependencies
-  echo -e "${CYAN}[SBS] Installing dependencies and preparing system...${RESET}"
+  echo -e "${CYAN}[Sparrowx] Installing dependencies and preparing system...${RESET}"
   apt-get update -qq
   apt-get install -y ca-certificates curl gnupg kmod nftables iproute2 net-tools jq wireguard wireguard-tools procps < /dev/null
 
@@ -592,16 +607,16 @@ SYSCTL_EOF
 
   # Install node if missing
   if ! command -v node &>/dev/null; then
-    echo -e "${CYAN}[SBS] Installing Node.js 20.x...${RESET}"
+    echo -e "${CYAN}[Sparrowx] Installing Node.js 20.x...${RESET}"
     curl -fsSL https://deb.nodesource.com/setup_20.x | bash - &>/dev/null
     apt-get install -y nodejs &>/dev/null
-    echo -e "${GREEN}[✓] Node.js installed.${RESET}"
+    echo -e "${GREEN}[ok] Node.js installed.${RESET}"
   fi
 
   # Write systemd unit
   cat > /etc/systemd/system/sbs-agent.service << EOF
 [Unit]
-Description=Detroit SBS Agent
+Description=Sparrowx Agent
 After=network.target
 
 [Service]
@@ -621,23 +636,23 @@ EOF
 
   systemctl daemon-reload
   systemctl enable sbs-agent
-  echo -e "${GREEN}[✓] Systemd service registered.${RESET}"
+  echo -e "${GREEN}[ok] Systemd service registered.${RESET}"
 fi
 
-# ── Always: restart service ───────────────────────────────────
+# -- Always: restart service -----------------------------------
 if systemctl list-unit-files "$SERVICE_NAME.service" >/dev/null 2>&1 || [ -f "/etc/systemd/system/$SERVICE_NAME.service" ]; then
   systemctl daemon-reload
   systemctl enable "$SERVICE_NAME" >/dev/null 2>&1 || true
   systemctl restart "$SERVICE_NAME"
   sleep 2
   if systemctl is-active --quiet "$SERVICE_NAME"; then
-    echo -e "${GREEN}[✓] $SERVICE_NAME is running.${RESET}"
+    echo -e "${GREEN}[ok] $SERVICE_NAME is running.${RESET}"
   else
-    echo -e "${RED}[✗] $SERVICE_NAME failed to start. Check: journalctl -u $SERVICE_NAME -n 30 --no-pager${RESET}"
+    echo -e "${RED}[x] $SERVICE_NAME failed to start. Check: journalctl -u $SERVICE_NAME -n 30 --no-pager${RESET}"
     exit 1
   fi
 else
   echo -e "${YELLOW}[!] Service not registered. Run: sudo bash $0 --install${RESET}"
 fi
 
-echo -e "${GREEN}${BOLD}[SBS] Agent ready. ✓${RESET}"
+echo -e "${GREEN}${BOLD}[Sparrowx] Agent ready. ok${RESET}"

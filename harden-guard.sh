@@ -1,5 +1,5 @@
 #!/bin/bash
-# Detroit SBS - Guard Server Hardening & Defense Script
+# Sparrowx Guard Server Hardening & Defense Script
 # This script applies high-performance firewall rules, community threat lists, 
 # and kernel hardening to protect the Guard server from DDoS and malicious scans.
 
@@ -14,7 +14,7 @@ YELLOW='\033[1;33m'
 RESET='\033[0m'
 
 echo -e "${BLUE}[1/6] Hardening Kernel (sysctl)...${RESET}"
-cat << EOF > /etc/sysctl.d/99-sbs-hardening.conf
+cat << EOF > /etc/sysctl.d/99-sparrowx-hardening.conf
 # Anti-spoofing
 net.ipv4.conf.all.rp_filter = 1
 net.ipv4.conf.default.rp_filter = 1
@@ -36,13 +36,13 @@ net.core.netdev_max_backlog = 5000
 net.core.rmem_max = 16777216
 net.core.wmem_max = 16777216
 EOF
-sysctl -p /etc/sysctl.d/99-sbs-hardening.conf
+sysctl -p /etc/sysctl.d/99-sparrowx-hardening.conf
 
 echo -e "${BLUE}[2/6] Downloading Community Threat Lists...${RESET}"
-mkdir -p /opt/detroit-sbs/threat-lists
-curl -s https://rules.emergingthreats.net/fwrules/emerging-Block-IPs.txt | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' > /opt/detroit-sbs/threat-lists/emerging.txt
-curl -s https://www.spamhaus.org/drop/drop.txt | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' > /opt/detroit-sbs/threat-lists/spamhaus.txt
-curl -s https://iplists.firehol.org/files/firehol_level1.netset | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' > /opt/detroit-sbs/threat-lists/firehol.txt
+mkdir -p /opt/sparrowx/threat-lists
+curl -s https://rules.emergingthreats.net/fwrules/emerging-Block-IPs.txt | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' > /opt/sparrowx/threat-lists/emerging.txt
+curl -s https://www.spamhaus.org/drop/drop.txt | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' > /opt/sparrowx/threat-lists/spamhaus.txt
+curl -s https://iplists.firehol.org/files/firehol_level1.netset | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' > /opt/sparrowx/threat-lists/firehol.txt
 
 echo -e "${BLUE}[3/6] Applying Nftables Advanced Ruleset...${RESET}"
 cat << 'NFTEOF' > /etc/nftables.conf
@@ -50,7 +50,7 @@ cat << 'NFTEOF' > /etc/nftables.conf
 flush ruleset
 
 table inet detroit_guard {
-  # SBS Managed Blacklist
+  # Sparrowx managed blacklist
   set blacklist {
     type ipv4_addr
     flags dynamic,timeout
@@ -105,26 +105,26 @@ NFTEOF
 
 # Load the threat lists into nftables
 systemctl restart nftables
-cat /opt/detroit-sbs/threat-lists/*.txt | sort -u | while read ip; do
+cat /opt/sparrowx/threat-lists/*.txt | sort -u | while read ip; do
   nft add element inet detroit_guard threat_intel "{ $ip }" 2>/dev/null
 done
 
 echo -e "${BLUE}[4/6] Setting up Automatic Threat List Sync (Cron)...${RESET}"
-cat << 'CRONEOF' > /etc/cron.daily/sbs-sync-threats
+cat << 'CRONEOF' > /etc/cron.daily/sparrowx-sync-threats
 #!/bin/bash
-curl -s https://rules.emergingthreats.net/fwrules/emerging-Block-IPs.txt | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' > /opt/detroit-sbs/threat-lists/emerging.txt
-curl -s https://www.spamhaus.org/drop/drop.txt | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' > /opt/detroit-sbs/threat-lists/spamhaus.txt
+curl -s https://rules.emergingthreats.net/fwrules/emerging-Block-IPs.txt | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' > /opt/sparrowx/threat-lists/emerging.txt
+curl -s https://www.spamhaus.org/drop/drop.txt | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' > /opt/sparrowx/threat-lists/spamhaus.txt
 # Flush and reload set
 nft flush set inet detroit_guard threat_intel
-cat /opt/detroit-sbs/threat-lists/*.txt | sort -u | while read ip; do
+cat /opt/sparrowx/threat-lists/*.txt | sort -u | while read ip; do
   nft add element inet detroit_guard threat_intel "{ $ip }" 2>/dev/null
 done
 CRONEOF
-chmod +x /etc/cron.daily/sbs-sync-threats
+chmod +x /etc/cron.daily/sparrowx-sync-threats
 
 echo -e "${BLUE}[5/6] Verifying FastNetMon Status...${RESET}"
 if systemctl is-active --quiet fastnetmon; then
-  echo -e "${GREEN}[✓] FastNetMon is running.${RESET}"
+  echo -e "${GREEN}[ok] FastNetMon is running.${RESET}"
 else
   echo -e "${YELLOW}[!] FastNetMon is NOT active. Please check /etc/fastnetmon.conf${RESET}"
 fi
