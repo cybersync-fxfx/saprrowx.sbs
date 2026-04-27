@@ -61,15 +61,29 @@ const config = {
   enableTunnel: process.env.SBS_ENABLE_TUNNEL === '1'
 };
 
+const AGENT_BUNDLE_VERSION = '2026-04-27-self-update-1';
 const TUNNEL_RETRY_MS = 60000;
+const SELF_UPDATE_INTERVAL_MS = 5 * 60 * 1000;
 let tunnelRegisterInFlight = false;
 let tunnelRegistered = false;
 let lastTunnelRegisterAt = 0;
+let selfUpdateInFlight = false;
 
 function log(msg) {
   const line = '[' + new Date().toISOString() + '] ' + msg;
   try { fs.appendFileSync('/var/log/sbs/agent.log', line + '\n'); } catch(e){}
   console.log(line);
+}
+
+function getOsName() {
+  try {
+    const raw = fs.readFileSync('/etc/os-release', 'utf8');
+    const pretty = raw.match(/^PRETTY_NAME="?([^"\n]+)"?/m);
+    const id = raw.match(/^ID="?([^"\n]+)"?/m);
+    return (pretty && pretty[1]) || (id && id[1]) || os.type();
+  } catch(e) {
+    return os.type();
+  }
 }
 
 function request(path, method, data, cb, hops=0) {
@@ -93,6 +107,46 @@ function request(path, method, data, cb, hops=0) {
   req.on('error', e => cb && cb(e));
   if (data) req.write(JSON.stringify(data));
   req.end();
+}
+
+function applySelfUpdate(scriptBody, latestBuild) {
+  if (selfUpdateInFlight) return;
+  selfUpdateInFlight = true;
+  try {
+    fs.writeFileSync('/opt/sbs-agent/.sbs-agent-update.sh', scriptBody, { mode: 0o700 });
+    log('[update] applying agent build ' + latestBuild);
+    exec('nohup bash /opt/sbs-agent/.sbs-agent-update.sh --self-update >> /var/log/sbs/agent-update.log 2>&1 &', {
+      shell:'/bin/bash'
+    }, ()=>{});
+  } catch(e) {
+    selfUpdateInFlight = false;
+    log('[update] failed to stage update: ' + e.message);
+  }
+}
+
+function checkSelfUpdate() {
+  if (selfUpdateInFlight || !config.agentId || !config.apiKey || !config.server) return;
+  request('/api/agent/update-info', 'POST', {
+    agentId: config.agentId,
+    apiKey: config.apiKey,
+    build: AGENT_BUNDLE_VERSION
+  }, (err,res)=>{
+    if(err||!res) return;
+    let info=null;
+    try { info=JSON.parse(res); } catch(e) { return; }
+    if(!info||!info.updateRequired||!info.latestBuild) return;
+    log('[update] server has newer agent build ' + info.latestBuild + ' (local ' + AGENT_BUNDLE_VERSION + ')');
+    request('/api/agent/self-update-script', 'POST', {
+      agentId: config.agentId,
+      apiKey: config.apiKey
+    }, (scriptErr, scriptBody)=>{
+      if(scriptErr||!scriptBody) {
+        log('[update] failed to download update script: ' + (scriptErr ? scriptErr.message : 'empty response'));
+        return;
+      }
+      applySelfUpdate(scriptBody, info.latestBuild);
+    });
+  });
 }
 
 function registerTunnel(reason = 'register') {
@@ -126,7 +180,7 @@ function register() {
     apiKey:   config.apiKey,
     hostname: fs.readFileSync('/proc/sys/kernel/hostname','utf-8').trim(),
     ip:       'auto',
-    os:       'Ubuntu',
+    os:       getOsName(),
     arch:     process.arch
   }, err => { 
     if(err) {
@@ -447,6 +501,7 @@ function sendStats() {
           txBytes:netNow.tx||0,
           telemetrySource:'/proc/net/dev',
           telemetryAgentBuild:TELEMETRY_AGENT_BUILD,
+          agentBuild:AGENT_BUNDLE_VERSION,
           uptime:      parseFloat(lines[5])||0,
           udpConns:    parseInt(lines[6])||0,
           log:         logOutput,
@@ -487,9 +542,11 @@ function pollCommands() {
 
 // ── Boot ──────────────────────────────────────────────────────
 register();
+checkSelfUpdate();
 setInterval(register,     15000);
 setInterval(sendStats,     1000);
 setInterval(pollCommands,  1000);
+setInterval(checkSelfUpdate, SELF_UPDATE_INTERVAL_MS);
 AGENT_EOF
 
 chmod 600 "$AGENT_BIN"
@@ -568,7 +625,9 @@ EOF
 fi
 
 # ── Always: restart service ───────────────────────────────────
-if systemctl list-units --type=service | grep -q "$SERVICE_NAME"; then
+if systemctl list-unit-files "$SERVICE_NAME.service" >/dev/null 2>&1 || [ -f "/etc/systemd/system/$SERVICE_NAME.service" ]; then
+  systemctl daemon-reload
+  systemctl enable "$SERVICE_NAME" >/dev/null 2>&1 || true
   systemctl restart "$SERVICE_NAME"
   sleep 2
   if systemctl is-active --quiet "$SERVICE_NAME"; then

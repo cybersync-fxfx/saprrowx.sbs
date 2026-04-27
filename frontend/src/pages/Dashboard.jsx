@@ -244,6 +244,7 @@ export default function Dashboard({ token }) {
     { label: 'IP Address', value: stats.ip },
     { label: 'OS',         value: stats.os || '—' },
     { label: 'Interface',  value: stats.iface },
+    { label: 'Agent Build', value: stats.agentBuild || 'legacy' },
     { label: 'Uptime',     value: uptimeLabel },
     { label: 'In (Mbps)',  value: stats.inMbps.toFixed(3) },
     { label: 'Out (Mbps)', value: stats.outMbps.toFixed(3) },

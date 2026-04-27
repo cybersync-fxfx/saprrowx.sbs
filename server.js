@@ -85,6 +85,7 @@ app.use(express.static(path.join(__dirname, 'frontend', 'dist')));
 let db = { agents: {} }; // agents store runtime state
 let commandQueue = {}; // { agentId: [{ id, cmd }] }
 let commandLedger = {}; // { cmdId: { agentId, kind, status, output, ... } }
+const agentAutoUpdateAttempts = new Map();
 let radar = null;
 const STORAGE_ROOT = path.join(__dirname, 'storage');
 const RUNTIME_STATE_PATH = path.join(STORAGE_ROOT, 'runtime-state.json');
@@ -211,6 +212,10 @@ const ipv4Pattern = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\
 const CLIENT_TUNNEL_SCRIPT_SOURCE = fs
   .readFileSync(path.join(__dirname, 'agent', 'setup-tunnel-client.sh'), 'utf8')
   .replace(/\r\n/g, '\n');
+const AGENT_BUNDLE_VERSION = '2026-04-27-self-update-1';
+const AGENT_UPDATE_SCRIPT_SOURCE = fs
+  .readFileSync(path.join(__dirname, 'agent', 'sbs-agent.sh'), 'utf8')
+  .replace(/\r\n/g, '\n');
 
 const CLIENT_TUNNEL_SERVICE_UNIT = `[Unit]
 Description=SBS Client WireGuard Tunnel
@@ -285,6 +290,99 @@ const recordCommandResult = (cmdId, result = {}) => {
     status: result.exitCode === 0 ? 'succeeded' : 'failed',
   };
   return commandLedger[cmdId];
+};
+
+const buildAgentSelfUpdateCommand = () => `node <<'NODE'
+const fs = require('fs');
+const http = require('http');
+const https = require('https');
+const { exec } = require('child_process');
+
+function parseEnv(file) {
+  const result = {};
+  const raw = fs.readFileSync(file, 'utf8');
+  for (const line of raw.split('\\n')) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const idx = trimmed.indexOf('=');
+    if (idx === -1) continue;
+    result[trimmed.slice(0, idx)] = trimmed.slice(idx + 1);
+  }
+  return result;
+}
+
+const env = parseEnv('/opt/sbs-agent/.env');
+let server = env.SBS_SERVER;
+const agentId = env.SBS_AGENT_ID;
+const apiKey = env.SBS_API_KEY;
+if (!server || !agentId || !apiKey) {
+  throw new Error('Missing SBS agent environment.');
+}
+
+function post(path, data, cb, hops = 0) {
+  const url = new URL(path, server);
+  const body = JSON.stringify(data);
+  const mod = url.protocol === 'https:' ? https : http;
+  const req = mod.request(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Content-Length': Buffer.byteLength(body),
+      'User-Agent': 'sbs-agent-bootstrap-updater/1.0'
+    }
+  }, (res) => {
+    let payload = '';
+    res.on('data', (chunk) => payload += chunk);
+    res.on('end', () => {
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location && hops < 3) {
+        const redirectedUrl = new URL(res.headers.location, url);
+        server = redirectedUrl.origin;
+        return post(redirectedUrl.pathname + redirectedUrl.search, data, cb, hops + 1);
+      }
+      if (res.statusCode < 200 || res.statusCode >= 300) {
+        return cb(new Error('HTTP ' + res.statusCode + ': ' + payload));
+      }
+      cb(null, payload);
+    });
+  });
+  req.on('error', cb);
+  req.write(body);
+  req.end();
+}
+
+post('/api/agent/self-update-script', { agentId, apiKey }, (err, script) => {
+  if (err) throw err;
+  fs.writeFileSync('/opt/sbs-agent/.sbs-agent-update.sh', script, { mode: 0o700 });
+  exec('nohup bash /opt/sbs-agent/.sbs-agent-update.sh --self-update >> /var/log/sbs/agent-update.log 2>&1 &', {
+    shell: '/bin/bash'
+  }, () => {});
+  console.log('SBS agent self-update staged.');
+});
+NODE`;
+
+const queueAgentSelfUpdateIfNeeded = (agentId, observedBuild, userId) => {
+  if (!agentId) return;
+  const localBuild = String(observedBuild || '').trim();
+  if (localBuild === AGENT_BUNDLE_VERSION) return;
+
+  const attempt = agentAutoUpdateAttempts.get(agentId);
+  if (attempt?.build === AGENT_BUNDLE_VERSION && Date.now() - attempt.at < 30 * 60 * 1000) return;
+
+  const alreadyQueued = (commandQueue[agentId] || []).some((cmd) => cmd.kind === 'agent:self-update');
+  if (alreadyQueued) return;
+
+  queueAgentCommand(agentId, buildAgentSelfUpdateCommand(), {
+    kind: 'agent:self-update',
+    summary: `Auto-update SBS agent to ${AGENT_BUNDLE_VERSION}`,
+  });
+  agentAutoUpdateAttempts.set(agentId, { build: AGENT_BUNDLE_VERSION, at: Date.now() });
+  appendClientLog(agentId, {
+    type: 'agent_auto_update_queued',
+    at: new Date().toISOString(),
+    userId,
+    observedBuild: localBuild || 'legacy',
+    targetBuild: AGENT_BUNDLE_VERSION,
+  });
 };
 
 const getLatestAgentCommand = (agentId, kindPrefix = null) => {
@@ -855,10 +953,13 @@ const config = {
   enableTunnel: process.env.SBS_ENABLE_TUNNEL === '1'
 };
 
+const AGENT_BUNDLE_VERSION = '${AGENT_BUNDLE_VERSION}';
 const TUNNEL_RETRY_MS = 60000;
+const SELF_UPDATE_INTERVAL_MS = 5 * 60 * 1000;
 let tunnelRegisterInFlight = false;
 let tunnelRegistered = false;
 let lastTunnelRegisterAt = 0;
+let selfUpdateInFlight = false;
 
 function log(message) {
   const line = '[' + new Date().toISOString() + '] ' + message;
@@ -866,6 +967,17 @@ function log(message) {
     fs.appendFileSync('/var/log/sbs/agent.log', line + '\\n');
   } catch (e) {}
   console.log(line);
+}
+
+function getOsName() {
+  try {
+    const raw = fs.readFileSync('/etc/os-release', 'utf8');
+    const pretty = raw.match(/^PRETTY_NAME="?([^"\\n]+)"?/m);
+    const id = raw.match(/^ID="?([^"\\n]+)"?/m);
+    return (pretty && pretty[1]) || (id && id[1]) || os.type();
+  } catch (_) {
+    return os.type();
+  }
 }
 
 function makeRequest(path, method, data, callback, redirectCount = 0) {
@@ -900,6 +1012,50 @@ function makeRequest(path, method, data, callback, redirectCount = 0) {
   req.end();
 }
 
+function applySelfUpdate(scriptBody, latestBuild) {
+  if (selfUpdateInFlight) return;
+  selfUpdateInFlight = true;
+  try {
+    fs.writeFileSync('/opt/sbs-agent/.sbs-agent-update.sh', scriptBody, { mode: 0o700 });
+    log('[update] applying agent build ' + latestBuild);
+    exec('nohup bash /opt/sbs-agent/.sbs-agent-update.sh --self-update >> /var/log/sbs/agent-update.log 2>&1 &', {
+      shell: '/bin/bash'
+    }, () => {});
+  } catch (err) {
+    selfUpdateInFlight = false;
+    log('[update] failed to stage update: ' + err.message);
+  }
+}
+
+function checkSelfUpdate() {
+  if (selfUpdateInFlight || !config.agentId || !config.apiKey || !config.server) return;
+  makeRequest('/api/agent/update-info', 'POST', {
+    agentId: config.agentId,
+    apiKey: config.apiKey,
+    build: AGENT_BUNDLE_VERSION
+  }, (err, res) => {
+    if (err || !res) return;
+    let info = null;
+    try {
+      info = JSON.parse(res);
+    } catch (_) {
+      return;
+    }
+    if (!info || !info.updateRequired || !info.latestBuild) return;
+    log('[update] server has newer agent build ' + info.latestBuild + ' (local ' + AGENT_BUNDLE_VERSION + ')');
+    makeRequest('/api/agent/self-update-script', 'POST', {
+      agentId: config.agentId,
+      apiKey: config.apiKey
+    }, (scriptErr, scriptBody) => {
+      if (scriptErr || !scriptBody) {
+        log('[update] failed to download update script: ' + (scriptErr ? scriptErr.message : 'empty response'));
+        return;
+      }
+      applySelfUpdate(scriptBody, info.latestBuild);
+    });
+  });
+}
+
 function registerTunnel(reason = 'register') {
   if (!config.enableTunnel || tunnelRegisterInFlight || tunnelRegistered) return;
 
@@ -930,7 +1086,7 @@ function register() {
     apiKey: config.apiKey,
     hostname: fs.readFileSync('/proc/sys/kernel/hostname', 'utf-8').trim(),
     ip: 'auto',
-    os: '${osType === 'debian' ? 'Debian' : 'Ubuntu'}',
+    os: getOsName(),
     arch: process.arch
   }, (err) => {
     if (err) {
@@ -1278,6 +1434,7 @@ function sendStats() {
           txBytes: netNow.tx || 0,
           telemetrySource: '/proc/net/dev',
           telemetryAgentBuild: TELEMETRY_AGENT_BUILD,
+          agentBuild: AGENT_BUNDLE_VERSION,
           uptime: parseFloat(lines[5]) || 0,
           udpConns: parseInt(lines[6]) || 0,
           log:   logOutput,
@@ -1316,9 +1473,11 @@ function pollCommands() {
 }
 
 register();
+checkSelfUpdate();
 setInterval(register, 15000);
 setInterval(sendStats, 1000);
 setInterval(pollCommands, 1000);
+setInterval(checkSelfUpdate, SELF_UPDATE_INTERVAL_MS);
 AGENT_JS_EOF
 
 cat << ENV_EOF > /opt/sbs-agent/.env
@@ -1432,6 +1591,7 @@ app.post('/api/agent/stats', agentAuthMiddleware, (req, res) => {
   const { agentId } = req.user;
   const requestIp = normalizeIp(req.headers['x-forwarded-for'] || req.socket.remoteAddress);
   const stats = req.body;
+  queueAgentSelfUpdateIfNeeded(agentId, stats?.agentBuild, req.user.id);
   const tunnelName = stats?.tunnelName || getTunnelInterfaceName(agentId);
   const tunnelPresent = Boolean(stats?.tunnelPresent);
   const agent = upsertAgentState(agentId, {
@@ -1511,6 +1671,21 @@ app.get('/api/agent/last-stats', authMiddleware, (req, res) => {
   // Only return if agent sent stats within the last 30 seconds
   if (Date.now() - cached.savedAt > 30000) return res.json({ available: false });
   res.json({ available: true, ...cached });
+});
+
+app.post('/api/agent/update-info', agentAuthMiddleware, (req, res) => {
+  const build = String(req.body?.build || '').trim();
+  res.json({
+    latestBuild: AGENT_BUNDLE_VERSION,
+    updateRequired: build !== AGENT_BUNDLE_VERSION,
+    checkAfterMs: 5 * 60 * 1000,
+  });
+});
+
+app.post('/api/agent/self-update-script', agentAuthMiddleware, (req, res) => {
+  res.setHeader('Content-Type', 'text/x-shellscript; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-store');
+  res.send(AGENT_UPDATE_SCRIPT_SOURCE);
 });
 
 app.get('/api/agent/commands', agentAuthMiddleware, (req, res) => {

@@ -49,7 +49,7 @@ export function TelemetryProvider({ token, children }) {
     avgPacketBytes: 0,
     packetDiff: 0, rxPacketDiff: 0, txPacketDiff: 0,
     rxPackets: 0, txPackets: 0, rxBytes: 0, txBytes: 0,
-    telemetrySource: '', telemetryAgentBuild: '',
+    telemetrySource: '', telemetryAgentBuild: '', agentBuild: '',
     hostname: '-', ip: '-', os: '-', iface: '-',
   });
 
@@ -132,6 +132,7 @@ export function TelemetryProvider({ token, children }) {
       txBytes: s.txBytes ?? prev.txBytes,
       telemetrySource: s.telemetrySource || prev.telemetrySource,
       telemetryAgentBuild: s.telemetryAgentBuild || prev.telemetryAgentBuild,
+      agentBuild: s.agentBuild || prev.agentBuild,
       uptime:      s.uptime       ?? prev.uptime,
       inMbps:      s.inMbps       ?? prev.inMbps,
       outMbps:     s.outMbps      ?? prev.outMbps,
