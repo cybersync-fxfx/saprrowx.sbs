@@ -3,6 +3,7 @@ import TrafficLedger from '../components/TrafficLedger';
 import { useTelemetry } from '../context/TelemetryContext';
 
 const DEFAULT_CONFIG = {
+  mode: 'normal',
   enabled: true,
   autoBan: true,
   threshold: 90,
@@ -84,6 +85,17 @@ export default function ThreatRadar({ token }) {
   const radarStatus = data.radar || null;
   const summary = radarStatus?.summary || null;
   const liveScores = Array.isArray(data.liveScores) ? data.liveScores : [];
+  const inferMode = () => {
+    if (config.mode && ['normal', 'strict', 'shield'].includes(config.mode)) return config.mode;
+    if (config.threshold <= 65 || config.synBan <= 35) return 'shield';
+    if (config.threshold <= 80 || config.synBan <= 60) return 'strict';
+    return 'normal';
+  };
+  const activeMode = inferMode();
+  const modeLabel = activeMode === 'shield' ? 'Shield Mode' : activeMode === 'strict' ? 'Strict Mode' : 'Normal Mode';
+  const packetCounterReady = stats.telemetryAgentBuild === 'netdev-v2';
+  const packetDelta = Number(stats.packetDiff || 0);
+  const packetSourceLabel = packetCounterReady ? (stats.telemetrySource || '/proc/net/dev') : 'Legacy agent';
   const lastScanLabel = radarStatus?.lastScanAt
     ? new Date(radarStatus.lastScanAt).toLocaleTimeString()
     : 'No scans yet';
@@ -160,12 +172,12 @@ export default function ThreatRadar({ token }) {
           <div className="metric-value">{loading ? '...' : data.stats.blockedToday}</div>
         </article>
         <article className="metric-card">
-          <div className="metric-label">24/7 Auto Defence</div>
-          <div className="metric-value">{config.autoBan ? 'ARMED' : 'WATCH'}</div>
+          <div className="metric-label">Active Defense</div>
+          <div className="metric-value">{modeLabel.replace(' Mode', '').toUpperCase()}</div>
         </article>
         <article className="metric-card">
-          <div className="metric-label">Scan Loop</div>
-          <div className="metric-value">{Math.max(1, Math.round((config.scanIntervalMs || 1000) / 1000))}s</div>
+          <div className="metric-label">Auto Ban</div>
+          <div className="metric-value">{config.autoBan ? 'ARMED' : 'WATCH'}</div>
         </article>
       </section>
 
@@ -175,36 +187,44 @@ export default function ThreatRadar({ token }) {
             <p className="eyebrow">Defense Modes</p>
             <h3>Rapid DDoS Protection Presets</h3>
           </div>
-          <div className="meta-chip">Admin control</div>
+          <div className={`status-pill ${config.enabled ? 'connected' : 'disconnected'}`}>
+            Active: {modeLabel}
+          </div>
         </div>
-        <div className="button-row">
+        <div className="defense-mode-grid">
           <button
             type="button"
-            className="secondary-button"
+            className={`mode-button ${activeMode === 'normal' ? 'active' : ''}`}
             disabled={Boolean(modeBusy)}
             onClick={() => switchMode('normal')}
           >
             {modeBusy === 'normal' ? 'Applying...' : 'Normal'}
+            <span>Balanced score gates</span>
           </button>
           <button
             type="button"
-            className="secondary-button"
+            className={`mode-button ${activeMode === 'strict' ? 'active' : ''}`}
             disabled={Boolean(modeBusy)}
             onClick={() => switchMode('strict')}
           >
             {modeBusy === 'strict' ? 'Applying...' : 'Strict'}
+            <span>Lower watch and ban gates</span>
           </button>
           <button
             type="button"
-            className="danger"
+            className={`mode-button shield ${activeMode === 'shield' ? 'active' : ''}`}
             disabled={Boolean(modeBusy)}
             onClick={() => switchMode('shield')}
           >
             {modeBusy === 'shield' ? 'Applying...' : 'Shield Mode'}
+            <span>Fast containment thresholds</span>
           </button>
         </div>
-        <div className="callout-inline warning" style={{ marginTop: '10px' }}>
-          Use <strong>Shield Mode</strong> during active attacks. It lowers ban thresholds aggressively for faster containment.
+        <div className="defense-status-grid">
+          <div><span>Scanner</span><strong>{config.enabled ? '24/7 ACTIVE' : 'OFF'}</strong></div>
+          <div><span>Auto Ban</span><strong>{config.autoBan ? 'ARMED' : 'WATCH ONLY'}</strong></div>
+          <div><span>Ban Score</span><strong>{config.threshold}</strong></div>
+          <div><span>Packet Counter</span><strong>{packetSourceLabel}</strong></div>
         </div>
       </section>
 
@@ -219,6 +239,7 @@ export default function ThreatRadar({ token }) {
             <span className="meta-chip text-amber">Medium</span>
             <span className="meta-chip text-red">Suspicious</span>
             <span className="meta-chip">{(stats.pps || 0).toFixed(1)} pps</span>
+            <span className="meta-chip">Delta {packetDelta} packets</span>
             <span className="meta-chip">{lastFlowLabel}</span>
             <span className="meta-chip">{trafficEvents.length} rows</span>
           </div>

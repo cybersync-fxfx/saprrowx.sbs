@@ -5,6 +5,7 @@ const { getTunnelStateDir, listTunnelConfigs } = require('./tunnel-config');
 
 const DEFAULT_SCAN_INTERVAL_MS = Number(process.env.SBS_RADAR_SCAN_INTERVAL_MS || 1000);
 const DEFAULT_CONFIG = {
+  mode: String(process.env.SBS_RADAR_MODE || 'normal').trim().toLowerCase(),
   enabled: process.env.SBS_RADAR_ENABLED !== '0',
   autoBan: process.env.SBS_RADAR_AUTO_BAN !== '0',
   threshold: Number(process.env.SBS_RADAR_BAN_THRESHOLD || 90),
@@ -154,6 +155,9 @@ class RadarScanner {
   normalizeConfig(raw = {}) {
     return {
       enabled: DEFAULT_CONFIG.enabled,
+      mode: ['normal', 'strict', 'shield'].includes(String(raw.mode || '').trim().toLowerCase())
+        ? String(raw.mode).trim().toLowerCase()
+        : DEFAULT_CONFIG.mode,
       autoBan: DEFAULT_CONFIG.autoBan,
       threshold: toInteger(raw.threshold, DEFAULT_CONFIG.threshold, 1, 100),
       watchThreshold: toInteger(raw.watchThreshold, DEFAULT_CONFIG.watchThreshold, 1, 100),

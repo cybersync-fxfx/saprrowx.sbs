@@ -47,6 +47,9 @@ export function TelemetryProvider({ token, children }) {
     memPercent: 0, synRate: 0, pps: 0, uptime: 0,
     inMbps: 0, outMbps: 0, udpConns: 0,
     avgPacketBytes: 0,
+    packetDiff: 0, rxPacketDiff: 0, txPacketDiff: 0,
+    rxPackets: 0, txPackets: 0, rxBytes: 0, txBytes: 0,
+    telemetrySource: '', telemetryAgentBuild: '',
     hostname: '-', ip: '-', os: '-', iface: '-',
   });
 
@@ -120,6 +123,15 @@ export function TelemetryProvider({ token, children }) {
       synRate:     s.synRate      ?? prev.synRate,
       pps:         s.pps          ?? prev.pps,
       avgPacketBytes: s.avgPacketBytes ?? prev.avgPacketBytes,
+      packetDiff: s.packetDiff ?? prev.packetDiff,
+      rxPacketDiff: s.rxPacketDiff ?? prev.rxPacketDiff,
+      txPacketDiff: s.txPacketDiff ?? prev.txPacketDiff,
+      rxPackets: s.rxPackets ?? prev.rxPackets,
+      txPackets: s.txPackets ?? prev.txPackets,
+      rxBytes: s.rxBytes ?? prev.rxBytes,
+      txBytes: s.txBytes ?? prev.txBytes,
+      telemetrySource: s.telemetrySource || prev.telemetrySource,
+      telemetryAgentBuild: s.telemetryAgentBuild || prev.telemetryAgentBuild,
       uptime:      s.uptime       ?? prev.uptime,
       inMbps:      s.inMbps       ?? prev.inMbps,
       outMbps:     s.outMbps      ?? prev.outMbps,
@@ -195,9 +207,10 @@ export function TelemetryProvider({ token, children }) {
       },
     ];
 
+    const hasCounterDelta = Number(s.packetDiff || 0) > 0 || incomingFallbackBytes > 0 || outgoingFallbackBytes > 0;
     const trafficPayload = Array.isArray(s.trafficEvents) && s.trafficEvents.length > 0
       ? s.trafficEvents
-      : fallbackEvents;
+      : (hasCounterDelta ? fallbackEvents : []);
 
     if (trafficPayload.length > 0) {
       const normalized = trafficPayload.map((event, index) => ({
@@ -231,7 +244,13 @@ export function TelemetryProvider({ token, children }) {
         severity: event.severity || 'success',
         reason: event.reason || 'normal flow',
       }));
-      setTrafficEvents(prev => [...normalized, ...prev].slice(0, 240));
+      const visible = normalized.filter((event) => {
+        if (String(event.protocol || '').toUpperCase() !== 'IFACE') return true;
+        return Number(event.packets || 0) > 0 || Number(event.sizeBytes || 0) > 0 || Number(event.rateMbps || 0) > 0;
+      });
+      if (visible.length > 0) {
+        setTrafficEvents(prev => [...visible, ...prev].slice(0, 240));
+      }
     }
   }, []);
 

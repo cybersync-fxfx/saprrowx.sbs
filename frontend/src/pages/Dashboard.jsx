@@ -126,6 +126,9 @@ export default function Dashboard({ token }) {
   }, [isConnected, ageSec]);
 
   const wsLabel = { open: 'WS OK', connecting: 'WS Connecting', reconnecting: 'WS Reconnecting', error: 'WS Error' }[wsState] || wsState;
+  const packetCounterReady = stats.telemetryAgentBuild === 'netdev-v2';
+  const packetDelta = Number(stats.packetDiff || 0);
+  const packetSourceLabel = packetCounterReady ? (stats.telemetrySource || '/proc/net/dev') : 'Legacy agent';
   const topAttackSources = useMemo(() => {
     const scores = new Map();
     for (const event of trafficEvents) {
@@ -164,7 +167,7 @@ export default function Dashboard({ token }) {
     { label: 'CPU Usage',         value: `${stats.cpuPercent.toFixed(1)}%`, tone: 'blue' },
     { label: 'Memory',            value: `${(stats.memPercent || 0).toFixed(1)}%`, tone: 'red' },
     { label: 'Packets / Sec',     value: (stats.pps || 0).toFixed(1),      tone: 'blue' },
-    { label: 'Avg Packet',        value: `${stats.avgPacketBytes || 0} B`, tone: 'blue' },
+    { label: 'Packet Delta',      value: packetDelta,                      tone: 'blue' },
   ];
 
   const handleCreateTunnel = async () => {
@@ -347,6 +350,13 @@ export default function Dashboard({ token }) {
         </section>
       )}
 
+      {isConnected && !packetCounterReady && (
+        <section className="callout-banner warning">
+          <strong>Packet telemetry needs agent refresh.</strong>
+          <span>The panel is receiving agent stats, but this client has not reported the new packet-counter build yet.</span>
+        </section>
+      )}
+
       <section className="metric-grid">
         {statCards.map(card => (
           <article key={card.label} className={`metric-card tone-${card.tone}`}>
@@ -368,7 +378,7 @@ export default function Dashboard({ token }) {
           <div className="traffic-panel-fill dashboard-flow-fill">
             <div className="inline-section-heading">
               <span>Realtime Traffic</span>
-              <span>{(stats.pps || 0).toFixed(1)} pps</span>
+              <span>{packetDelta} packets / {(stats.pps || 0).toFixed(1)} pps</span>
             </div>
             <TrafficLedger events={trafficEvents} limit={6} compact />
           </div>
@@ -429,6 +439,10 @@ export default function Dashboard({ token }) {
                 {tab}
               </button>
             ))}
+            <div className={`meta-chip ${packetCounterReady ? 'text-green' : 'text-amber'}`}>
+              {packetSourceLabel}
+            </div>
+            <div className="meta-chip">Delta {packetDelta} packets</div>
             <div className="meta-chip" style={{ color: 'var(--accent-cyan)' }}>↓ {stats.inMbps.toFixed(3)}</div>
             <div className="meta-chip" style={{ color: 'var(--warn-amber)' }}>↑ {stats.outMbps.toFixed(3)}</div>
           </div>
@@ -447,7 +461,7 @@ export default function Dashboard({ token }) {
         <div className="traffic-panel-fill">
           <div className="inline-section-heading">
             <span>Live IP Flow</span>
-            <span>{trafficEvents.length} samples</span>
+            <span>{packetSourceLabel} / {trafficEvents.length} samples</span>
           </div>
           <TrafficLedger events={trafficEvents} limit={8} compact />
         </div>
@@ -459,7 +473,9 @@ export default function Dashboard({ token }) {
           <div className="fact-list compact">
             <div className="fact-row"><span>SYN Rate</span><span className={`fact-value ${stats.synRate > 500 ? 'danger' : ''}`}>{stats.synRate}/s</span></div>
             <div className="fact-row"><span>Packets / Sec</span><span className="fact-value">{stats.pps}</span></div>
+            <div className="fact-row"><span>Packet Delta</span><span className="fact-value">{packetDelta}</span></div>
             <div className="fact-row"><span>Avg Packet Size</span><span className="fact-value">{stats.avgPacketBytes || 0} B</span></div>
+            <div className="fact-row"><span>Counter Source</span><span className={`fact-value ${packetCounterReady ? 'success' : 'warning'}`}>{packetSourceLabel}</span></div>
             <div className="fact-row"><span>Blocked IPs</span><span className={`fact-value ${stats.bannedIPs > 0 ? 'danger' : ''}`}>{stats.bannedIPs}</span></div>
             <div className="fact-row"><span>Established TCP</span><span className="fact-value">{stats.connections}</span></div>
           </div>

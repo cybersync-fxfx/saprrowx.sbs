@@ -365,6 +365,8 @@ function collectTrafficEvents(iface) {
 }
 
 // ── Stats ─────────────────────────────────────────────────────
+const TELEMETRY_AGENT_BUILD = 'netdev-v2';
+
 function sendStats() {
   readNetBytes((_,netNow)=>{
     const elapsed=(Date.now()-lastNet.ts)/1000||1;
@@ -436,6 +438,15 @@ function sendStats() {
           memPercent:  parseFloat(lines[4])||0,
           inMbps, outMbps, pps,
           avgPacketBytes,
+          packetDiff,
+          rxPacketDiff,
+          txPacketDiff,
+          rxPackets:netNow.rxPackets||0,
+          txPackets:netNow.txPackets||0,
+          rxBytes:netNow.rx||0,
+          txBytes:netNow.tx||0,
+          telemetrySource:'/proc/net/dev',
+          telemetryAgentBuild:TELEMETRY_AGENT_BUILD,
           uptime:      parseFloat(lines[5])||0,
           udpConns:    parseInt(lines[6])||0,
           log:         logOutput,

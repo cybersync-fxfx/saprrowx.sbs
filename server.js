@@ -1024,6 +1024,7 @@ function readNetBytes(cb) {
 }
 
 let lastNetSample = { rx: 0, tx: 0, rxPackets: 0, txPackets: 0, ts: Date.now() };
+const TELEMETRY_AGENT_BUILD = 'netdev-v2';
 
 function parseEndpoint(value) {
   const raw = String(value || '').replace(/,.*/, '').trim();
@@ -1268,6 +1269,15 @@ function sendStats() {
           outMbps,
           pps,
           avgPacketBytes,
+          packetDiff,
+          rxPacketDiff,
+          txPacketDiff,
+          rxPackets: netNow.rxPackets || 0,
+          txPackets: netNow.txPackets || 0,
+          rxBytes: netNow.rx || 0,
+          txBytes: netNow.tx || 0,
+          telemetrySource: '/proc/net/dev',
+          telemetryAgentBuild: TELEMETRY_AGENT_BUILD,
           uptime: parseFloat(lines[5]) || 0,
           udpConns: parseInt(lines[6]) || 0,
           log:   logOutput,
@@ -1947,6 +1957,7 @@ function getRadarModePatch(mode) {
     return {
       mode: 'normal',
       patch: {
+        mode: 'normal',
         autoBan: true,
         threshold: 90,
         watchThreshold: 55,
@@ -1968,6 +1979,7 @@ function getRadarModePatch(mode) {
     return {
       mode: 'strict',
       patch: {
+        mode: 'strict',
         autoBan: true,
         threshold: 80,
         watchThreshold: 45,
@@ -1989,6 +2001,7 @@ function getRadarModePatch(mode) {
     return {
       mode: 'shield',
       patch: {
+        mode: 'shield',
         autoBan: true,
         threshold: 65,
         watchThreshold: 35,

@@ -25,12 +25,17 @@ function endpoint(ip, port) {
 }
 
 export default function TrafficLedger({ events = [], limit = 18, compact = false }) {
-  const rows = events.slice(0, limit);
+  const rows = events
+    .filter((event) => {
+      if (String(event.protocol || '').toUpperCase() !== 'IFACE') return true;
+      return Number(event.packets || 0) > 0 || Number(event.sizeBytes || 0) > 0 || Number(event.rateMbps || 0) > 0;
+    })
+    .slice(0, limit);
 
   if (rows.length === 0) {
     return (
       <div className="empty-state">
-        Waiting for live flow samples from the agent.
+        No packet delta in the current telemetry window.
       </div>
     );
   }

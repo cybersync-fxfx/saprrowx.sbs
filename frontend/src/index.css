@@ -1064,6 +1064,81 @@ button.danger:hover:not(:disabled) {
   gap: 8px;
 }
 
+.defense-mode-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.mode-button {
+  display: flex;
+  min-height: 66px;
+  align-items: flex-start;
+  justify-content: center;
+  flex-direction: column;
+  gap: 4px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(96, 165, 250, 0.28);
+  box-shadow: none;
+  text-align: left;
+  color: var(--accent-blue);
+}
+
+.mode-button span {
+  color: var(--text-soft);
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.mode-button.active {
+  color: var(--success-green);
+  border-color: rgba(34, 197, 94, 0.75);
+  background: rgba(34, 197, 94, 0.1);
+  box-shadow: 0 0 18px rgba(34, 197, 94, 0.16);
+}
+
+.mode-button.shield.active {
+  color: var(--warn-amber);
+  border-color: rgba(245, 158, 11, 0.75);
+  background: rgba(245, 158, 11, 0.12);
+  box-shadow: 0 0 18px rgba(245, 158, 11, 0.16);
+}
+
+.defense-status-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.defense-status-grid > div {
+  border: 1px solid rgba(59, 130, 246, 0.2);
+  background: rgba(0, 15, 0, 0.28);
+  padding: 9px 10px;
+  min-width: 0;
+}
+
+.defense-status-grid span,
+.defense-status-grid strong {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.defense-status-grid span {
+  color: var(--text-muted);
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 1.6px;
+}
+
+.defense-status-grid strong {
+  color: var(--text-main);
+  font-size: 0.78rem;
+  margin-top: 4px;
+}
+
 .action-card {
   text-align: left;
   padding: 14px;
@@ -1211,6 +1286,8 @@ tr:hover td {
   .sidebar { width: 100%; border-right: none; border-bottom: 1px solid rgba(255,255,255,0.08); padding: 24px; }
   .content-area, .topbar { padding: 20px; }
   .metric-grid { grid-template-columns: 1fr; }
+  .defense-mode-grid,
+  .defense-status-grid { grid-template-columns: 1fr; }
   .terminal-form { flex-direction: column; align-items: stretch; }
   .page-title { font-size: 2.2rem; }
 }
