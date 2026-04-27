@@ -145,51 +145,76 @@ function register() {
 let lastNet = { rx:0, tx:0, rxPackets:0, txPackets:0, ts:Date.now() };
 let cachedPrimaryIface = '';
 
+function parseProcNetDev() {
+  try {
+    return fs.readFileSync('/proc/net/dev','utf8')
+      .split('\n')
+      .slice(2)
+      .map((line)=>{
+        const parts=line.trim().split(/[:\s]+/).filter(Boolean);
+        if(parts.length<17) return null;
+        const rx=Number(parts[1])||0;
+        const rxPackets=Number(parts[2])||0;
+        const tx=Number(parts[9])||0;
+        const txPackets=Number(parts[10])||0;
+        return {
+          iface:parts[0],
+          rx,
+          rxPackets,
+          tx,
+          txPackets,
+          totalBytes:rx+tx,
+          totalPackets:rxPackets+txPackets
+        };
+      })
+      .filter(item=>item&&item.iface!=='lo');
+  } catch(e) {
+    return [];
+  }
+}
+
 function getPrimaryInterface() {
   if (cachedPrimaryIface) return cachedPrimaryIface;
   try {
-    cachedPrimaryIface = execSync("ip -o -4 route show to default 2>/dev/null | awk '{print $5; exit}'", {
-      encoding:'utf8',
-      timeout:800,
-      stdio:['ignore','pipe','ignore']
-    }).trim();
+    const routes=fs.readFileSync('/proc/net/route','utf8')
+      .split('\n')
+      .slice(1)
+      .map(line=>line.trim().split(/\s+/))
+      .filter(parts=>parts.length>2);
+    const defaultRoute=routes.find(parts=>parts[1]==='00000000');
+    if(defaultRoute&&defaultRoute[0]) cachedPrimaryIface=defaultRoute[0];
   } catch(e) {
     cachedPrimaryIface = '';
+  }
+  if(!cachedPrimaryIface) {
+    const counters=parseProcNetDev();
+    const preferred=counters.find(item=>/^e(n|th|ns|np|no|p|m)/.test(item.iface))||counters[0];
+    cachedPrimaryIface=preferred?preferred.iface:'';
   }
   return cachedPrimaryIface;
 }
 
 function readNetBytes(cb) {
-  const iface = String(getPrimaryInterface() || '').replace(/[^A-Za-z0-9_.:-]/g, '');
-  const cmd = "awk 'NR>2 {name=$1; gsub(\":\",\"\",name); if(name!=\"lo\"){print name,$2,$3,$10,$11}}' /proc/net/dev";
-  exec(cmd, (e,out)=>{
-    if((!out||!out.trim())&&iface) {
-      cachedPrimaryIface = '';
-      return readNetBytes(cb);
-    }
-    if(e||!out.trim()) return cb(null,{rx:0,tx:0,iface:'unknown'});
-    const rows=out
-      .trim()
-      .split('\n')
-      .map(line=>line.trim().split(/\s+/))
-      .filter(parts=>parts.length>=5);
-    if(rows.length===0) return cb(null,{rx:0,tx:0,iface:'unknown'});
-    const preferredRow=iface ? rows.find(parts=>String(parts[0])===iface) : null;
-    const displayIface=preferredRow ? String(preferredRow[0]) : String(rows[0][0]);
-    const totals=rows.reduce((acc, parts)=>{
-      acc.rx += parseInt(parts[1],10)||0;
-      acc.rxPackets += parseInt(parts[2],10)||0;
-      acc.tx += parseInt(parts[3],10)||0;
-      acc.txPackets += parseInt(parts[4],10)||0;
-      return acc;
-    }, { rx:0, tx:0, rxPackets:0, txPackets:0 });
-    cb(null,{
-      iface:displayIface||'unknown',
-      rx:totals.rx,
-      rxPackets:totals.rxPackets,
-      tx:totals.tx,
-      txPackets:totals.txPackets
-    });
+  const counters=parseProcNetDev();
+  const primary=getPrimaryInterface();
+  const display=
+    counters.find(item=>item.iface===primary)||
+    counters.slice().sort((a,b)=>(b.totalBytes-a.totalBytes)||(b.totalPackets-a.totalPackets))[0];
+
+  if(!display) return cb(null,{rx:0,tx:0,rxPackets:0,txPackets:0,iface:'unknown'});
+
+  const totals=counters.reduce((acc,item)=>{
+    acc.rx+=item.rx;
+    acc.rxPackets+=item.rxPackets;
+    acc.tx+=item.tx;
+    acc.txPackets+=item.txPackets;
+    return acc;
+  }, { rx:0, tx:0, rxPackets:0, txPackets:0 });
+
+  cachedPrimaryIface=display.iface;
+  cb(null,{
+    iface:display.iface,
+    ...totals
   });
 }
 
