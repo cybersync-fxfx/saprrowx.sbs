@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
-import { Activity, Terminal, Shield, ListX, Download, Key, Settings, LogOut, RadioTower, ServerCog } from 'lucide-react';
+import { Activity, Terminal, Shield, ListX, Download, Key, Settings, LogOut, RadioTower, ServerCog, Globe } from 'lucide-react';
 import { useTelemetry } from '../context/TelemetryContext';
 
 export default function Layout({ user, setToken }) {
@@ -28,6 +28,7 @@ export default function Layout({ user, setToken }) {
     { path: '/firewall', name: 'Firewall', icon: <Shield size={18} />, caption: 'Inspect active firewall rules and service state' },
     { path: '/blocklist', name: 'Block List', icon: <ListX size={18} />, caption: 'Ban, review, and remove blocked IPs' },
     { path: '/radar', name: 'Threat Radar', icon: <RadioTower size={18} />, caption: 'Live IP scoring and automated defense' },
+    { path: '/map', name: 'Global Threat Map', icon: <Globe size={18} />, caption: 'Live geographic visualization' },
     { section: 'Setup' },
     { path: '/install', name: 'Install Agent', icon: <Download size={18} />, caption: 'Generate the installer and deploy to a server' },
     { path: '/apikeys', name: 'API & Keys', icon: <Key size={18} />, caption: 'Manage agent credentials and API access' },

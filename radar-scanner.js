@@ -2,6 +2,7 @@ const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const { getTunnelStateDir, listTunnelConfigs } = require('./tunnel-config');
+const geoip = require('geoip-lite');
 
 function envCompat(primaryName, legacyName, fallback = '') {
   const primary = process.env[primaryName];
@@ -451,9 +452,13 @@ class RadarScanner {
           await this.logThreat(ip, result, action, metrics);
         }
 
+        const geo = geoip.lookup(ip);
         liveScores.push({
           id: `${nowIso}-${ip}`,
           ip,
+          country: geo ? geo.country : 'Unknown',
+          lat: geo ? geo.ll[0] : null,
+          lon: geo ? geo.ll[1] : null,
           score: Math.min(100, result.score),
           rawScore: result.score,
           action,
