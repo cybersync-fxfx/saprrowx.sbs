@@ -259,11 +259,12 @@ export function TelemetryProvider({ token, children }) {
   const connect = useCallback(() => {
     if (!token || unmounted.current) return;
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const ws = new WebSocket(`${protocol}//${window.location.host}?token=${token}`);
+    const ws = new WebSocket(`${protocol}//${window.location.host}`);
     wsRef.current = ws;
     setWsState('connecting');
 
     ws.onopen = () => {
+      ws.send(JSON.stringify({ type: 'auth', token }));
       retryCount.current = 0;
       setWsState('open');
     };

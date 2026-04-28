@@ -2272,27 +2272,53 @@ function getRadarModePatch(mode) {
 // -- Websocket logic ------------------------------------------
 const clients = {}; // { userId: [ws1, ws2] }
 
-wss.on('connection', async (ws, req) => {
+wss.on('connection', (ws, req) => {
   const url = new URL(req.url, 'http://localhost');
-  const token = url.searchParams.get('token');
-  if (!token) return ws.close();
-  
-  try {
+  const tokenFromQuery = url.searchParams.get('token');
+  let authTimer = null;
+  ws.once('close', () => {
+    if (authTimer) clearTimeout(authTimer);
+  });
+
+  const authenticateSocket = async (token) => {
+    if (!token) throw new Error('Missing token');
     const { user, profile } = await getApprovedProfileFromToken(token, 'agent_id,status');
     const userId = user.id;
     if (!clients[userId]) clients[userId] = [];
     clients[userId].push(ws);
+    if (authTimer) clearTimeout(authTimer);
 
     if (profile && db.agents[profile.agent_id]) {
       ws.send(JSON.stringify(buildAgentConnectedMessage(db.agents[profile.agent_id])));
     }
-    
+
     ws.on('close', () => {
       clients[userId] = clients[userId].filter(c => c !== ws);
     });
-  } catch (err) {
-    ws.close();
+  };
+
+  if (tokenFromQuery) {
+    authenticateSocket(tokenFromQuery).catch(() => ws.close());
+    return;
   }
+
+  authTimer = setTimeout(() => ws.close(), 5000);
+  ws.once('message', (raw) => {
+    let msg = null;
+    try {
+      msg = JSON.parse(String(raw));
+    } catch (_) {
+      ws.close();
+      return;
+    }
+
+    if (msg?.type !== 'auth' || !msg.token) {
+      ws.close();
+      return;
+    }
+
+    authenticateSocket(msg.token).catch(() => ws.close());
+  });
 });
 
 function broadcastToUser(userId, message) {
