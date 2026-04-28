@@ -22,7 +22,7 @@ if [ -z "$IFACE" ]; then
 fi
 
 echo -e "\033[0;34m[Sparrowx XDP] Compiling XDP Engine for $IFACE...\033[0m"
-clang -O2 -g -Wall -target bpf -c sparrowx_xdp.c -o sparrowx_xdp.o
+clang -O2 -g -Wall -target bpf -I/usr/include/$(uname -m)-linux-gnu -c sparrowx_xdp.c -o sparrowx_xdp.o
 
 if [ ! -f "sparrowx_xdp.o" ]; then
     echo -e "\033[0;31m[!] Compilation failed.\033[0m"
