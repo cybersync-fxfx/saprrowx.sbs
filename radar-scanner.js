@@ -468,8 +468,8 @@ class RadarScanner {
           const ipHash = ip.split('.').reduce((a, b) => a + parseInt(b || 0), 0) || 0;
           const fb = FALLBACKS[ipHash % FALLBACKS.length];
           country = fb.c;
-          lat = fb.lat + ((ipHash % 10) - 5) * 0.5;
-          lon = fb.lon + ((ipHash % 12) - 6) * 0.5;
+          lat = fb.lat + ((ipHash % 100) - 50) * 0.15; // Jitter up to +/- 7.5 degrees
+          lon = fb.lon + (((ipHash * 3) % 100) - 50) * 0.15;
         }
 
         liveScores.push({

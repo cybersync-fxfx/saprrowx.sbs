@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { ComposableMap, Geographies, Geography, Marker } from 'react-simple-maps';
+import { ComposableMap, Geographies, Geography, Marker, Line } from 'react-simple-maps';
 import { useTelemetry } from '../context/TelemetryContext';
 
 const geoUrl = "https://unpkg.com/world-atlas@2.0.2/countries-110m.json";
+const GUARD_COORD = [-83.0458, 42.3314]; // Detroit Guard Node
 
 export default function ThreatMap({ token }) {
   const { trafficEvents } = useTelemetry();
@@ -72,26 +73,53 @@ export default function ThreatMap({ token }) {
                 ))
               }
             </Geographies>
+
+            {/* Central Guard Node */}
+            <Marker coordinates={GUARD_COORD}>
+              <circle r={4} fill="#00d8ff" />
+              <circle r={16} fill="#00d8ff" opacity={0.3} className="ping-anim" />
+              <text textAnchor="middle" y={-12} style={{ fontFamily: "monospace", fill: "#00d8ff", fontSize: "10px", letterSpacing: "1px", textShadow: "0 0 5px #00d8ff" }}>GUARD</text>
+            </Marker>
             
             {markers.map((marker) => {
               const color = getColor(marker.action, marker.score);
               return (
-                <Marker key={marker.id} coordinates={[marker.lon, marker.lat]}>
-                  <circle r={3} fill={color} opacity={0.9} />
-                  <circle r={12} fill={color} opacity={0.4} className="ping-anim" />
-                </Marker>
+                <React.Fragment key={marker.id}>
+                  {/* Shooting Attack Arc */}
+                  <Line
+                    from={[marker.lon, marker.lat]}
+                    to={GUARD_COORD}
+                    stroke={color}
+                    strokeWidth={1}
+                    strokeLinecap="round"
+                    className="attack-line"
+                    style={{ opacity: 0.5 }}
+                  />
+                  {/* Attacker Node */}
+                  <Marker coordinates={[marker.lon, marker.lat]}>
+                    <circle r={3} fill={color} opacity={0.9} />
+                    <circle r={14} fill={color} opacity={0.4} className="ping-anim" />
+                  </Marker>
+                </React.Fragment>
               );
             })}
           </ComposableMap>
           <style>{`
             @keyframes ping {
               0% { transform: scale(0.2); opacity: 0.8; }
-              80% { transform: scale(1.5); opacity: 0; }
-              100% { transform: scale(1.5); opacity: 0; }
+              80% { transform: scale(2.5); opacity: 0; }
+              100% { transform: scale(2.5); opacity: 0; }
             }
             .ping-anim {
               animation: ping 2s infinite cubic-bezier(0, 0, 0.2, 1);
               transform-origin: center;
+            }
+            @keyframes march {
+              to { stroke-dashoffset: -20; }
+            }
+            .attack-line {
+              stroke-dasharray: 4 6;
+              animation: march 0.8s linear infinite;
             }
           `}</style>
         </section>
