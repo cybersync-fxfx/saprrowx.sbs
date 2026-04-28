@@ -32,14 +32,19 @@ Sparrowx is a full-stack infrastructure security platform designed for DDoS prot
    `SPARROWX_RADAR_*` controls the active guard-side scan engine and auto-ban thresholds. If your panel stays behind Cloudflare or another reverse proxy, add those proxy CIDRs to `SPARROWX_RADAR_TRUSTED_PROXY_CIDRS` so the scanner never auto-bans them.
 
 3. **Database Setup:**
-   Execute the contents of `supabase_setup.sql` in your Supabase project's SQL Editor to create the required tables, triggers, and security policies.
+   Execute the contents of `supabase_setup.sql` and `supabase_threat_radar.sql` in your Supabase project's SQL Editor to create the required tables, triggers, and security policies.
 
-4. **Start the Server:**
+4. **Build the Frontend:**
+   ```bash
+   npm run build
+   ```
+
+5. **Start the Server:**
    ```bash
    npm start
    ```
 
-5. **Login:**
+6. **Login:**
    Open `http://localhost:3001` in your browser and register a new account.
 
 ## Deployment Guide (Production)
@@ -59,6 +64,7 @@ Clone the repository and install dependencies.
 git clone <your-repo-url> /opt/sbs
 cd /opt/sbs
 npm install
+npm run build
 ```
 
 ### 3. Start with PM2

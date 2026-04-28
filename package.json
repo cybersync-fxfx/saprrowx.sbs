@@ -4,6 +4,9 @@
   "description": "Sparrowx autonomous infrastructure security panel",
   "main": "index.js",
   "scripts": {
+    "build": "npm --prefix frontend ci && npm --prefix frontend run build",
+    "frontend:build": "npm --prefix frontend run build",
+    "frontend:dev": "npm --prefix frontend run dev",
     "start": "node server.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },

@@ -162,11 +162,11 @@ class RadarScanner {
 
   normalizeConfig(raw = {}) {
     return {
-      enabled: DEFAULT_CONFIG.enabled,
+      enabled: toBoolean(raw.enabled, DEFAULT_CONFIG.enabled),
       mode: ['normal', 'strict', 'shield'].includes(String(raw.mode || '').trim().toLowerCase())
         ? String(raw.mode).trim().toLowerCase()
         : DEFAULT_CONFIG.mode,
-      autoBan: DEFAULT_CONFIG.autoBan,
+      autoBan: toBoolean(raw.autoBan, DEFAULT_CONFIG.autoBan),
       threshold: toInteger(raw.threshold, DEFAULT_CONFIG.threshold, 1, 100),
       watchThreshold: toInteger(raw.watchThreshold, DEFAULT_CONFIG.watchThreshold, 1, 100),
       connWarn: toInteger(raw.connWarn, DEFAULT_CONFIG.connWarn, 1),
@@ -181,7 +181,7 @@ class RadarScanner {
       burstBan: toInteger(raw.burstBan, DEFAULT_CONFIG.burstBan, 1),
       portFanoutWarn: toInteger(raw.portFanoutWarn, DEFAULT_CONFIG.portFanoutWarn, 1),
       portFanoutBan: toInteger(raw.portFanoutBan, DEFAULT_CONFIG.portFanoutBan, 1),
-      scanIntervalMs: DEFAULT_CONFIG.scanIntervalMs,
+      scanIntervalMs: toInteger(raw.scanIntervalMs, DEFAULT_CONFIG.scanIntervalMs, 1000, 300000),
       banCooldownMs: toInteger(raw.banCooldownMs, DEFAULT_CONFIG.banCooldownMs, 1000),
       logCooldownMs: toInteger(raw.logCooldownMs, DEFAULT_CONFIG.logCooldownMs, 1000),
       ignoredLocalPorts: Array.isArray(raw.ignoredLocalPorts)

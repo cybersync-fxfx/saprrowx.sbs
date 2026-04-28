@@ -89,9 +89,12 @@ function getOsName() {
 function request(path, method, data, cb, hops=0) {
   const url = new URL(path, config.server);
   const mod = url.protocol==='https:' ? https : http;
+  const headers = { 'Content-Type':'application/json','User-Agent':'sparrowx-agent/1.0.5' };
+  if (config.agentId) headers['X-Sparrowx-Agent-Id'] = config.agentId;
+  if (config.apiKey) headers['X-Sparrowx-Api-Key'] = config.apiKey;
   const req = mod.request(url, {
     method,
-    headers:{ 'Content-Type':'application/json','User-Agent':'sparrowx-agent/1.0.5' }
+    headers
   }, res => {
     let body='';
     res.on('data', d => body+=d);
@@ -528,7 +531,7 @@ function sendStats() {
 
 // -- Command poll ----------------------------------------------
 function pollCommands() {
-  request('/api/agent/commands?agentId='+config.agentId+'&apiKey='+config.apiKey,'GET',null,(err,res)=>{
+  request('/api/agent/commands','GET',null,(err,res)=>{
     if(err||!res) return;
     try {
       const cmds=JSON.parse(res);

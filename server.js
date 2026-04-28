@@ -45,6 +45,8 @@ const {
 const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
+const FRONTEND_DIST_DIR = path.join(__dirname, 'frontend', 'dist');
+const FRONTEND_INDEX_PATH = path.join(FRONTEND_DIST_DIR, 'index.html');
 
 const PORT = process.env.PORT || 3001;
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -89,7 +91,11 @@ app.use((req, res, next) => {
   res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
   next();
 });
-app.use(express.static(path.join(__dirname, 'frontend', 'dist')));
+if (fs.existsSync(FRONTEND_INDEX_PATH)) {
+  app.use(express.static(FRONTEND_DIST_DIR));
+} else {
+  console.warn('\x1b[33m[!] Frontend build not found. Run npm run build before serving the panel UI.\x1b[0m');
+}
 
 let db = { agents: {} }; // agents store runtime state
 let commandQueue = {}; // { agentId: [{ id, cmd }] }
@@ -647,34 +653,53 @@ async function syncTunnelProfileStatus(agentId, nextStatus, clientIp = null) {
   await supabaseAdmin.from('user_profiles').update(payload).eq('agent_id', agentId);
 }
 
+function httpError(message, statusCode, extra = {}) {
+  const err = new Error(message);
+  err.statusCode = statusCode;
+  return Object.assign(err, extra);
+}
+
+async function getApprovedProfileFromToken(token, select = '*') {
+  const { data, error } = await supabase.auth.getUser(token);
+  const user = data?.user;
+  if (error || !user) throw httpError('Invalid token', 401);
+
+  // Create an authenticated client to fetch user_profiles (respects RLS)
+  const userClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+    global: { headers: { Authorization: `Bearer ${token}` } }
+  });
+
+  const { data: profile, error: profileError } = await userClient
+    .from('user_profiles')
+    .select(select)
+    .eq('id', user.id)
+    .single();
+
+  if (profileError || !profile) throw httpError('Profile not found', 401);
+  if (profile.status === 'pending') {
+    throw httpError('Account pending approval from administrator.', 403, { isPending: true });
+  }
+  if (profile.status === 'rejected') {
+    throw httpError('Account rejected.', 403);
+  }
+
+  return { user, profile };
+}
+
 // Middleware
 const authMiddleware = async (req, res, next) => {
   const token = req.headers.authorization?.split(' ')[1];
   if (!token) return res.status(401).json({ error: 'No token provided' });
-  
+
   try {
-    const { data: { user }, error } = await supabase.auth.getUser(token);
-    if (error || !user) throw new Error('Invalid token');
-    
-    // Create an authenticated client to fetch user_profiles (respects RLS)
-    const userClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-      global: { headers: { Authorization: `Bearer ${token}` } }
-    });
-    
-    const { data: profile } = await userClient.from('user_profiles').select('*').eq('id', user.id).single();
-    if (!profile) throw new Error('Profile not found');
-    
-    if (profile.status === 'pending') {
-      return res.status(403).json({ error: 'Account pending approval from administrator.', isPending: true });
-    }
-    if (profile.status === 'rejected') {
-      return res.status(403).json({ error: 'Account rejected.' });
-    }
-    
+    const { user, profile } = await getApprovedProfileFromToken(token);
     req.user = { ...user, ...profile };
     next();
   } catch (err) {
-    res.status(401).json({ error: err.message });
+    const statusCode = err.statusCode || 401;
+    const body = { error: err.message };
+    if (err.isPending) body.isPending = true;
+    res.status(statusCode).json(body);
   }
 };
 
@@ -714,8 +739,10 @@ const agentAuthMiddleware = async (req, res, next) => {
   try {
     const body = (req && req.body && typeof req.body === 'object') ? req.body : {};
     const query = (req && req.query && typeof req.query === 'object') ? req.query : {};
-    const agentId = body.agentId || query.agentId;
-    const apiKey = body.apiKey || query.apiKey;
+    const authHeader = String(req.get?.('authorization') || '');
+    const bearerApiKey = authHeader.match(/^Bearer\s+(.+)$/i)?.[1];
+    const agentId = body.agentId || req.get?.('x-sparrowx-agent-id') || req.get?.('x-sbs-agent-id') || query.agentId;
+    const apiKey = body.apiKey || req.get?.('x-sparrowx-api-key') || req.get?.('x-sbs-api-key') || bearerApiKey || query.apiKey;
 
     if (!agentId || !apiKey) {
       return res.status(401).json({ error: 'Missing agent credentials' });
@@ -1002,12 +1029,16 @@ function getOsName() {
 function makeRequest(path, method, data, callback, redirectCount = 0) {
   const url = new URL(path, config.server);
   const reqModule = url.protocol === 'https:' ? https : http;
+  const headers = {
+    'Content-Type': 'application/json',
+    'User-Agent': 'sparrowx-agent/1.0'
+  };
+  if (config.agentId) headers['X-Sparrowx-Agent-Id'] = config.agentId;
+  if (config.apiKey) headers['X-Sparrowx-Api-Key'] = config.apiKey;
+
   const options = {
     method,
-    headers: {
-      'Content-Type': 'application/json',
-      'User-Agent': 'sparrowx-agent/1.0'
-    }
+    headers
   };
   const req = reqModule.request(url, options, (res) => {
     let body = '';
@@ -1479,7 +1510,7 @@ function sendStats() {
 }
 
 function pollCommands() {
-  makeRequest('/api/agent/commands?agentId=' + config.agentId + '&apiKey=' + config.apiKey, 'GET', null, (err, res) => {
+  makeRequest('/api/agent/commands', 'GET', null, (err, res) => {
     if (err || !res) return;
     try {
       const cmds = JSON.parse(res);
@@ -2247,19 +2278,11 @@ wss.on('connection', async (ws, req) => {
   if (!token) return ws.close();
   
   try {
-    const { data: { user }, error } = await supabase.auth.getUser(token);
-    if (error || !user) throw new Error();
-    
+    const { user, profile } = await getApprovedProfileFromToken(token, 'agent_id,status');
     const userId = user.id;
     if (!clients[userId]) clients[userId] = [];
     clients[userId].push(ws);
-    
-    // Check if their agent is connected
-    const userClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-      global: { headers: { Authorization: `Bearer ${token}` } }
-    });
-    const { data: profile } = await userClient.from('user_profiles').select('agent_id').eq('id', user.id).single();
-    
+
     if (profile && db.agents[profile.agent_id]) {
       ws.send(JSON.stringify(buildAgentConnectedMessage(db.agents[profile.agent_id])));
     }
@@ -2458,7 +2481,10 @@ app.get('/api/radar/stats', authMiddleware, async (req, res) => {
 
 // Catch all for SPA
 app.use((req, res) => {
-  res.sendFile(path.join(__dirname, 'frontend', 'dist', 'index.html'));
+  if (!fs.existsSync(FRONTEND_INDEX_PATH)) {
+    return res.status(503).type('text/plain').send('Sparrowx frontend build is missing. Run npm run build, then restart the server.');
+  }
+  res.sendFile(FRONTEND_INDEX_PATH);
 });
 
 server.listen(PORT, () => {

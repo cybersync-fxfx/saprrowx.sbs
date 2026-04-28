@@ -179,8 +179,8 @@ Current threat-radar storage split:
 
 - Root backend start command: `npm start`
 - Frontend scripts live in `frontend/`: `npm run dev`, `npm run build`, `npm run preview`
-- Express serves `frontend/dist`, so production-like local runs expect a frontend build
-- `frontend/dist` currently exists in the workspace but is not the source of truth
+- Express serves `frontend/dist`, so production-like local runs expect `npm run build` first
+- `frontend/dist` is ignored and generated; source lives under `frontend/src`
 - Authenticated frontend pages now rely more heavily on [TelemetryContext.jsx](C:/Users/cyber/Documents/GitHub/sbs.detriot/frontend/src/context/TelemetryContext.jsx) than on page-local WebSocket handling
 - Threat radar starts from the backend automatically at server boot
 
