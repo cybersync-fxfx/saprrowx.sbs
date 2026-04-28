@@ -565,8 +565,7 @@ class RadarScanner {
   async banIp(ip, reason, metrics = {}) {
     console.log(`[Radar] BANNING IP: ${ip} | Reason: ${reason}`);
     if (typeof this.options.onBan === 'function') {
-      await this.options.onBan(ip, reason, metrics);
-      return;
+      try { await this.options.onBan(ip, reason, metrics); } catch (e) { console.error('[Radar] onBan hook error:', e.message); }
     }
 
     // 1. Add to Sparrowx XDP eBPF map for instant hardware-level dropping (Phase 1)

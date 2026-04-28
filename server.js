@@ -617,6 +617,7 @@ function listGuardBlockedIps() {
   const target = ensureGuardBlacklistSet();
   const output = execNft(['list', 'set', target.family, target.table, 'blacklist']);
   const ips = [...new Set(output.match(/\b(?:\d{1,3}\.){3}\d{1,3}\b/g) || [])];
+  global.cachedGuardBlockedIpsCount = ips.length;
   return { ...target, ips, output };
 }
 
@@ -1656,6 +1657,7 @@ app.post('/api/agent/stats', agentAuthMiddleware, (req, res) => {
   const { agentId } = req.user;
   const requestIp = normalizeIp(req.headers['x-forwarded-for'] || req.socket.remoteAddress);
   const stats = req.body;
+  if (stats) stats.bannedIPs = global.cachedGuardBlockedIpsCount || 0;
   queueAgentSelfUpdateIfNeeded(agentId, stats?.agentBuild, req.user.id);
   const tunnelName = stats?.tunnelName || getTunnelInterfaceName(agentId);
   const tunnelPresent = Boolean(stats?.tunnelPresent);
