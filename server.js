@@ -936,6 +936,8 @@ app.get('/api/guard/blocklist/summary', authMiddleware, (req, res) => {
   const summary = getGuardBlocklistSummary();
   res.json({
     count: summary.count,
+    totalBanned: Number(db.sbsBanTotal || 0),
+    totalBannedUpdatedAt: db.sbsBanTotalUpdatedAt || null,
     table: summary.tableLabel,
     updatedAt: summary.updatedAt ? new Date(summary.updatedAt).toISOString() : null,
     guardReady: summary.guardReady,
@@ -947,17 +949,21 @@ app.post('/api/guard/blocklist', authMiddleware, adminMiddleware, (req, res) => 
   try {
     const ip = assertValidIpv4(req.body?.ip);
     const result = addGuardBlockedIp(ip);
+    const banTotal = recordSbsBan(result, 'manual', ip);
     appendAttackLog(`[manual-ban] ${ip} blocked from dashboard by ${req.user.username || req.user.email || req.user.id}`);
     broadcastGlobalBan(ip);
     broadcastToAll({
       type: 'guard_blocklist_changed',
       count: result.ips.length,
+      totalBanned: banTotal.totalBanned,
+      totalBannedUpdatedAt: banTotal.totalBannedUpdatedAt,
       table: `${result.family} ${result.table}`,
       updatedAt: new Date().toISOString(),
     });
     res.json({
       success: true,
       ips: result.ips,
+      totalBanned: banTotal.totalBanned,
       table: `${result.family} ${result.table}`,
     });
   } catch (err) {
@@ -974,12 +980,15 @@ app.delete('/api/guard/blocklist/:ip', authMiddleware, adminMiddleware, (req, re
     broadcastToAll({
       type: 'guard_blocklist_changed',
       count: result.ips.length,
+      totalBanned: Number(db.sbsBanTotal || 0),
+      totalBannedUpdatedAt: db.sbsBanTotalUpdatedAt || null,
       table: `${result.family} ${result.table}`,
       updatedAt: new Date().toISOString(),
     });
     res.json({
       success: true,
       ips: result.ips,
+      totalBanned: Number(db.sbsBanTotal || 0),
       table: `${result.family} ${result.table}`,
     });
   } catch (err) {
@@ -1738,7 +1747,10 @@ app.post('/api/agent/stats', agentAuthMiddleware, (req, res) => {
   const requestIp = normalizeIp(req.headers['x-forwarded-for'] || req.socket.remoteAddress);
   const stats = req.body;
   const guardBlocklist = getGuardBlocklistSummary();
-  if (stats) stats.bannedIPs = guardBlocklist.count || 0;
+  if (stats) {
+    stats.bannedIPs = guardBlocklist.count || 0;
+    stats.sbsBanTotal = Number(db.sbsBanTotal || 0);
+  }
   queueAgentSelfUpdateIfNeeded(agentId, stats?.agentBuild, req.user.id);
   const tunnelName = stats?.tunnelName || getTunnelInterfaceName(agentId);
   const tunnelPresent = Boolean(stats?.tunnelPresent);
@@ -2257,6 +2269,7 @@ function broadcastGlobalUnban(ip) {
 
 async function applyRadarAutoBan(ip, reason, metrics = {}) {
   const result = addGuardBlockedIp(ip);
+  const banTotal = recordSbsBan(result, 'radar', ip);
   appendAttackLog(
     `[auto-ban] ${ip} blocked by Threat Radar: ${reason} | tcp=${metrics.tcp || 0} syn=${metrics.syn || 0} udp=${metrics.udp || 0} delta=${metrics.delta || 0}`
   );
@@ -2268,10 +2281,14 @@ async function applyRadarAutoBan(ip, reason, metrics = {}) {
     metrics,
     detectedAt: new Date().toISOString(),
     guardBlockedIps: result.ips.length,
+    totalBanned: banTotal.totalBanned,
+    totalBannedUpdatedAt: banTotal.totalBannedUpdatedAt,
   });
   broadcastToAll({
     type: 'guard_blocklist_changed',
     count: result.ips.length,
+    totalBanned: banTotal.totalBanned,
+    totalBannedUpdatedAt: banTotal.totalBannedUpdatedAt,
     table: `${result.family} ${result.table}`,
     updatedAt: new Date().toISOString(),
   });
@@ -2582,9 +2599,12 @@ app.get('/api/radar/stats', authMiddleware, async (req, res) => {
         scannedToday: scannedToday || 0,
         blockedToday: blockedToday || 0,
         guardBlockedIps: guardBlocklist.count || 0,
+        totalBanned: Number(db.sbsBanTotal || 0),
       },
       guardBlocklist: {
         count: guardBlocklist.count || 0,
+        totalBanned: Number(db.sbsBanTotal || 0),
+        totalBannedUpdatedAt: db.sbsBanTotalUpdatedAt || null,
         table: guardBlocklist.tableLabel,
         updatedAt: guardBlocklist.updatedAt ? new Date(guardBlocklist.updatedAt).toISOString() : null,
         guardReady: guardBlocklist.guardReady,

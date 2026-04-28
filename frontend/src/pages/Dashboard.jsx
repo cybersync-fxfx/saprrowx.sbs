@@ -160,10 +160,12 @@ export default function Dashboard({ token }) {
   const commandChannelTone = isConnected ? (wsState === 'open' ? '' : 'warning') : 'danger';
   const firewallLabel = tunnelMeta?.clientTunnelPresent ? 'Tunnel-Enforced' : (isConnected ? 'Active' : 'Unknown');
   const firewallTone = tunnelMeta?.clientTunnelPresent ? '' : (isConnected ? '' : 'danger');
+  const totalSbsBans = Number(stats.sbsBanTotal || 0);
+  const currentBlockedIps = Number(stats.bannedIPs || 0);
 
   const statCards = [
     { label: 'Active Connections', value: stats.connections,                tone: 'blue' },
-    { label: 'Blocked IPs',       value: stats.bannedIPs,                  tone: 'red'  },
+    { label: 'Blocked IPs',       value: totalSbsBans,                     tone: 'red', note: 'Since SBS activation' },
     { label: 'CPU Usage',         value: `${stats.cpuPercent.toFixed(1)}%`, tone: 'blue' },
     { label: 'Memory',            value: `${(stats.memPercent || 0).toFixed(1)}%`, tone: 'red' },
     { label: 'Packets / Sec',     value: (stats.pps || 0).toFixed(1),      tone: 'blue' },
@@ -363,6 +365,7 @@ export default function Dashboard({ token }) {
           <article key={card.label} className={`metric-card tone-${card.tone}`}>
             <div className="metric-label">{card.label}</div>
             <div className="metric-value">{card.value}</div>
+            {card.note ? <div className="metric-note">{card.note}</div> : null}
           </article>
         ))}
       </section>
@@ -477,7 +480,8 @@ export default function Dashboard({ token }) {
             <div className="fact-row"><span>Packet Delta</span><span className="fact-value">{packetDelta}</span></div>
             <div className="fact-row"><span>Avg Packet Size</span><span className="fact-value">{stats.avgPacketBytes || 0} B</span></div>
             <div className="fact-row"><span>Counter Source</span><span className={`fact-value ${packetCounterReady ? 'success' : 'warning'}`}>{packetSourceLabel}</span></div>
-            <div className="fact-row"><span>Blocked IPs</span><span className={`fact-value ${stats.bannedIPs > 0 ? 'danger' : ''}`}>{stats.bannedIPs}</span></div>
+            <div className="fact-row"><span>Total SBS Bans</span><span className={`fact-value ${totalSbsBans > 0 ? 'danger' : ''}`}>{totalSbsBans}</span></div>
+            <div className="fact-row"><span>Current Blocks</span><span className={`fact-value ${currentBlockedIps > 0 ? 'danger' : ''}`}>{currentBlockedIps}</span></div>
             <div className="fact-row"><span>Established TCP</span><span className="fact-value">{stats.connections}</span></div>
           </div>
         </article>
