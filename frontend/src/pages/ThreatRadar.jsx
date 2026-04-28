@@ -22,8 +22,8 @@ const DEFAULT_CONFIG = {
 };
 
 export default function ThreatRadar({ token }) {
-  const { trafficEvents, stats } = useTelemetry();
-  const [data, setData] = useState({ recent: [], liveScores: [], stats: { scannedToday: 0, blockedToday: 0 }, radar: null });
+  const { trafficEvents, stats, guardBlocklist } = useTelemetry();
+  const [data, setData] = useState({ recent: [], liveScores: [], stats: { scannedToday: 0, blockedToday: 0, guardBlockedIps: 0 }, radar: null });
   const [config, setConfig] = useState(DEFAULT_CONFIG);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -50,6 +50,7 @@ export default function ThreatRadar({ token }) {
           stats: {
             scannedToday: Number(d?.stats?.scannedToday || 0),
             blockedToday: Number(d?.stats?.blockedToday || 0),
+            guardBlockedIps: Number(d?.stats?.guardBlockedIps || d?.guardBlocklist?.count || 0),
           },
           radar: nextRadar,
         });
@@ -64,7 +65,7 @@ export default function ThreatRadar({ token }) {
         console.error(e);
         setError(e.message || 'Threat Radar failed to load.');
         setSetupRequired(Boolean(e.setupRequired));
-        setData({ recent: [], liveScores: [], stats: { scannedToday: 0, blockedToday: 0 }, radar: null });
+        setData({ recent: [], liveScores: [], stats: { scannedToday: 0, blockedToday: 0, guardBlockedIps: 0 }, radar: null });
         setLoading(false);
       });
   };
@@ -103,6 +104,7 @@ export default function ThreatRadar({ token }) {
     ? new Date(trafficEvents[0].timestamp).toLocaleTimeString()
     : 'waiting';
   const liveFlowLabel = trafficEvents.length > 0 ? `Agent stream ${lastFlowLabel}` : 'Waiting for agent stream';
+  const guardBlockedIps = guardBlocklist?.ready ? guardBlocklist.count : data.stats.guardBlockedIps;
 
   const switchMode = async (mode) => {
     if (!token || modeBusy) return;
@@ -168,8 +170,9 @@ export default function ThreatRadar({ token }) {
           <div className="metric-value">{loading ? '...' : (summary?.scannedIps ?? liveScores.length)}</div>
         </article>
         <article className="metric-card tone-red">
-          <div className="metric-label">Blocked Today</div>
-          <div className="metric-value">{loading ? '...' : data.stats.blockedToday}</div>
+          <div className="metric-label">Blocked IPs</div>
+          <div className="metric-value">{loading ? '...' : guardBlockedIps}</div>
+          <div className="metric-note">Today {data.stats.blockedToday} ban events</div>
         </article>
         <article className="metric-card">
           <div className="metric-label">Active Defense</div>

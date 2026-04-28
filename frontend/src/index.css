@@ -610,6 +610,12 @@ button.danger:hover:not(:disabled) {
   margin-bottom: 6px;
 }
 
+.metric-note {
+  color: var(--text-dim);
+  font-size: 0.68rem;
+  margin-top: 6px;
+}
+
 .metric-value {
   font-family: var(--font-display);
   font-size: 1.8rem;

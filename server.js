@@ -105,6 +105,16 @@ let radar = null;
 const STORAGE_ROOT = path.join(__dirname, 'storage');
 const RUNTIME_STATE_PATH = path.join(STORAGE_ROOT, 'runtime-state.json');
 const RUNTIME_SNAPSHOT_INTERVAL_MS = 15000;
+const GUARD_BLOCKLIST_CACHE_MS = 5000;
+let guardBlocklistCache = {
+  count: 0,
+  ips: [],
+  family: 'inet',
+  table: 'detroit_guard',
+  tableLabel: 'inet detroit_guard',
+  updatedAt: 0,
+  error: null,
+};
 
 fs.mkdirSync(STORAGE_ROOT, { recursive: true });
 
@@ -617,8 +627,32 @@ function listGuardBlockedIps() {
   const target = ensureGuardBlacklistSet();
   const output = execNft(['list', 'set', target.family, target.table, 'blacklist']);
   const ips = [...new Set(output.match(/\b(?:\d{1,3}\.){3}\d{1,3}\b/g) || [])];
-  global.cachedGuardBlockedIpsCount = ips.length;
-  return { ...target, ips, output };
+  guardBlocklistCache = {
+    count: ips.length,
+    ips,
+    family: target.family,
+    table: target.table,
+    tableLabel: `${target.family} ${target.table}`,
+    updatedAt: Date.now(),
+    error: null,
+  };
+  return { ...target, ips, output, count: ips.length };
+}
+
+function getGuardBlocklistSummary(maxAgeMs = GUARD_BLOCKLIST_CACHE_MS) {
+  const cacheFresh = guardBlocklistCache.updatedAt && Date.now() - guardBlocklistCache.updatedAt < maxAgeMs;
+  if (cacheFresh) return { ...guardBlocklistCache, guardReady: true };
+
+  try {
+    listGuardBlockedIps();
+    return { ...guardBlocklistCache, guardReady: true };
+  } catch (err) {
+    return {
+      ...guardBlocklistCache,
+      guardReady: false,
+      error: err.message || 'Failed to read guard blocklist.',
+    };
+  }
 }
 
 function addGuardBlockedIp(ip) {
@@ -875,12 +909,29 @@ app.get('/api/guard/blocklist', authMiddleware, adminMiddleware, (req, res) => {
   }
 });
 
+app.get('/api/guard/blocklist/summary', authMiddleware, (req, res) => {
+  const summary = getGuardBlocklistSummary();
+  res.json({
+    count: summary.count,
+    table: summary.tableLabel,
+    updatedAt: summary.updatedAt ? new Date(summary.updatedAt).toISOString() : null,
+    guardReady: summary.guardReady,
+    error: summary.error,
+  });
+});
+
 app.post('/api/guard/blocklist', authMiddleware, adminMiddleware, (req, res) => {
   try {
     const ip = assertValidIpv4(req.body?.ip);
     const result = addGuardBlockedIp(ip);
     appendAttackLog(`[manual-ban] ${ip} blocked from dashboard by ${req.user.username || req.user.email || req.user.id}`);
     broadcastGlobalBan(ip);
+    broadcastToAll({
+      type: 'guard_blocklist_changed',
+      count: result.ips.length,
+      table: `${result.family} ${result.table}`,
+      updatedAt: new Date().toISOString(),
+    });
     res.json({
       success: true,
       ips: result.ips,
@@ -897,6 +948,12 @@ app.delete('/api/guard/blocklist/:ip', authMiddleware, adminMiddleware, (req, re
     const result = removeGuardBlockedIp(ip);
     appendAttackLog(`[manual-unban] ${ip} removed from dashboard by ${req.user.username || req.user.email || req.user.id}`);
     broadcastGlobalUnban(ip);
+    broadcastToAll({
+      type: 'guard_blocklist_changed',
+      count: result.ips.length,
+      table: `${result.family} ${result.table}`,
+      updatedAt: new Date().toISOString(),
+    });
     res.json({
       success: true,
       ips: result.ips,
@@ -1657,7 +1714,8 @@ app.post('/api/agent/stats', agentAuthMiddleware, (req, res) => {
   const { agentId } = req.user;
   const requestIp = normalizeIp(req.headers['x-forwarded-for'] || req.socket.remoteAddress);
   const stats = req.body;
-  if (stats) stats.bannedIPs = global.cachedGuardBlockedIpsCount || 0;
+  const guardBlocklist = getGuardBlocklistSummary();
+  if (stats) stats.bannedIPs = guardBlocklist.count || 0;
   queueAgentSelfUpdateIfNeeded(agentId, stats?.agentBuild, req.user.id);
   const tunnelName = stats?.tunnelName || getTunnelInterfaceName(agentId);
   const tunnelPresent = Boolean(stats?.tunnelPresent);
@@ -2175,7 +2233,7 @@ function broadcastGlobalUnban(ip) {
 }
 
 async function applyRadarAutoBan(ip, reason, metrics = {}) {
-  addGuardBlockedIp(ip);
+  const result = addGuardBlockedIp(ip);
   appendAttackLog(
     `[auto-ban] ${ip} blocked by Threat Radar: ${reason} | tcp=${metrics.tcp || 0} syn=${metrics.syn || 0} udp=${metrics.udp || 0} delta=${metrics.delta || 0}`
   );
@@ -2186,6 +2244,13 @@ async function applyRadarAutoBan(ip, reason, metrics = {}) {
     reason,
     metrics,
     detectedAt: new Date().toISOString(),
+    guardBlockedIps: result.ips.length,
+  });
+  broadcastToAll({
+    type: 'guard_blocklist_changed',
+    count: result.ips.length,
+    table: `${result.family} ${result.table}`,
+    updatedAt: new Date().toISOString(),
   });
 }
 
@@ -2465,6 +2530,7 @@ app.post('/api/radar/mode', authMiddleware, adminMiddleware, (req, res) => {
 app.get('/api/radar/stats', authMiddleware, async (req, res) => {
   try {
     const since = new Date(Date.now() - 86400000).toISOString();
+    const guardBlocklist = getGuardBlocklistSummary();
 
     const { data: recent, error: recentError } = await supabaseAdmin
       .from('threat_radar')
@@ -2491,7 +2557,15 @@ app.get('/api/radar/stats', authMiddleware, async (req, res) => {
       liveScores: radar ? radar.getLiveScores() : [],
       stats: {
         scannedToday: scannedToday || 0,
-        blockedToday: blockedToday || 0
+        blockedToday: blockedToday || 0,
+        guardBlockedIps: guardBlocklist.count || 0,
+      },
+      guardBlocklist: {
+        count: guardBlocklist.count || 0,
+        table: guardBlocklist.tableLabel,
+        updatedAt: guardBlocklist.updatedAt ? new Date(guardBlocklist.updatedAt).toISOString() : null,
+        guardReady: guardBlocklist.guardReady,
+        error: guardBlocklist.error,
       },
       radar: radar ? radar.getStatus() : null,
     });

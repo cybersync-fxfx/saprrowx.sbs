@@ -4,7 +4,7 @@ import { useTelemetry } from '../context/TelemetryContext';
 const ipv4Pattern = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/;
 
 export default function Blocklist({ token }) {
-  const { isConnected } = useTelemetry();
+  const { isConnected, refreshGuardBlocklistSummary } = useTelemetry();
 
   const [banInput, setBanInput] = useState('');
   const [ips, setIps] = useState([]);
@@ -31,6 +31,7 @@ export default function Blocklist({ token }) {
       setGuardTable(data.table || 'inet detroit_guard');
       setGuardReady(true);
       setLastSync(new Date());
+      refreshGuardBlocklistSummary?.();
       if (!silent) setFeedback({ msg: '', type: '' });
     } catch (err) {
       setGuardReady(false);
@@ -38,14 +39,17 @@ export default function Blocklist({ token }) {
     } finally {
       if (!silent) setLoading(false);
     }
-  }, [token]);
+  }, [token, refreshGuardBlocklistSummary]);
 
   useEffect(() => {
     if (!token) return undefined;
 
-    refresh();
+    const initial = setTimeout(() => refresh(), 0);
     intervalRef.current = setInterval(() => refresh(true), 15000);
-    return () => clearInterval(intervalRef.current);
+    return () => {
+      clearTimeout(initial);
+      clearInterval(intervalRef.current);
+    };
   }, [token, refresh]);
 
   const banIp = async () => {
@@ -79,6 +83,7 @@ export default function Blocklist({ token }) {
       setGuardTable(data.table || 'inet detroit_guard');
       setGuardReady(true);
       setLastSync(new Date());
+      refreshGuardBlocklistSummary?.();
       setBanInput('');
       setFeedback({ msg: `${ip} banned on the guard firewall.`, type: 'success' });
     } catch (err) {
@@ -107,6 +112,7 @@ export default function Blocklist({ token }) {
       setGuardTable(data.table || 'inet detroit_guard');
       setGuardReady(true);
       setLastSync(new Date());
+      refreshGuardBlocklistSummary?.();
       setFeedback({ msg: `${ip} removed from the guard firewall.`, type: 'success' });
     } catch (err) {
       setFeedback({ msg: err.message, type: 'danger' });

@@ -13,7 +13,9 @@ function saveToStorage(data) {
       ...data,
       savedAt: Date.now(),
     }));
-  } catch (_) {}
+  } catch {
+    // Ignore localStorage write failures; telemetry can continue live.
+  }
 }
 
 function loadFromStorage() {
@@ -24,7 +26,7 @@ function loadFromStorage() {
     // Only restore if saved within the last 10 minutes
     if (Date.now() - (parsed.savedAt || 0) > 10 * 60 * 1000) return null;
     return parsed;
-  } catch (_) {
+  } catch {
     return null;
   }
 }
@@ -60,6 +62,13 @@ export function TelemetryProvider({ token, children }) {
   const [logs,        setLogs]        = useState(saved?.logs ?? []);
   const [trafficEvents, setTrafficEvents] = useState(saved?.trafficEvents ?? []);
   const [lastUpdateMs, setLastUpdateMs] = useState(saved?.lastUpdateMs ?? null);
+  const [guardBlocklist, setGuardBlocklist] = useState({
+    count: Number(saved?.stats?.bannedIPs || 0),
+    table: '',
+    updatedAt: null,
+    ready: false,
+    error: '',
+  });
 
   // -- Persist to localStorage whenever key state changes --------------------
   const statsRef      = useRef(stats);
@@ -68,6 +77,7 @@ export function TelemetryProvider({ token, children }) {
   const connHistRef   = useRef(connHistory);
   const logsRef       = useRef(logs);
   const trafficEventsRef = useRef(trafficEvents);
+  const guardBlocklistRef = useRef(guardBlocklist);
   const lastUpdateRef = useRef(lastUpdateMs);
   const agentStatRef  = useRef(agentStatus);
 
@@ -78,6 +88,7 @@ export function TelemetryProvider({ token, children }) {
   useEffect(() => { connHistRef.current = connHistory; }, [connHistory]);
   useEffect(() => { logsRef.current = logs; }, [logs]);
   useEffect(() => { trafficEventsRef.current = trafficEvents; }, [trafficEvents]);
+  useEffect(() => { guardBlocklistRef.current = guardBlocklist; }, [guardBlocklist]);
   useEffect(() => { lastUpdateRef.current = lastUpdateMs; }, [lastUpdateMs]);
   useEffect(() => { agentStatRef.current = agentStatus; }, [agentStatus]);
 
@@ -108,17 +119,52 @@ export function TelemetryProvider({ token, children }) {
   const retryCount  = useRef(0);
   const unmounted   = useRef(false);
   const pendingCmds = useRef(new Map());
+  const connectRef  = useRef(null);
+
+  const refreshGuardBlocklistSummary = useCallback(async () => {
+    if (!token) return null;
+
+    try {
+      const res = await fetch('/api/guard/blocklist/summary', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to load guard block count.');
+
+      const next = {
+        count: Number(data.count || 0),
+        table: data.table || '',
+        updatedAt: data.updatedAt || null,
+        ready: data.guardReady !== false,
+        error: data.error || '',
+      };
+
+      if (!unmounted.current) {
+        guardBlocklistRef.current = next;
+        setGuardBlocklist(next);
+        setStats(prev => ({ ...prev, bannedIPs: next.count }));
+      }
+      return next;
+    } catch (err) {
+      const message = err.message || 'Failed to load guard block count.';
+      if (!unmounted.current) {
+        setGuardBlocklist(prev => ({ ...prev, ready: false, error: message }));
+      }
+      return null;
+    }
+  }, [token]);
 
   const processStatsUpdate = useCallback((msg) => {
     setAgentStatus('CONNECTED');
     const s     = msg.stats  || {};
     const agent = msg.agent  || {};
+    const guardCount = guardBlocklistRef.current?.ready ? guardBlocklistRef.current.count : null;
     setLastUpdateMs(Date.now());
 
     setStats(prev => ({
       ...prev,
       connections: s.connections  ?? prev.connections,
-      bannedIPs:   s.bannedIPs    ?? prev.bannedIPs,
+      bannedIPs:   guardCount     ?? s.bannedIPs    ?? prev.bannedIPs,
       cpuPercent:  s.cpuPercent   ?? prev.cpuPercent,
       memPercent:  s.memPercent   ?? prev.memPercent,
       synRate:     s.synRate      ?? prev.synRate,
@@ -295,6 +341,24 @@ export function TelemetryProvider({ token, children }) {
         processStatsUpdate(msg);
       }
 
+      if (msg.type === 'guard_blocklist_changed') {
+        const nextCount = Number(msg.count || 0);
+        const next = {
+          count: nextCount,
+          table: msg.table || '',
+          updatedAt: msg.updatedAt || new Date().toISOString(),
+          ready: true,
+          error: '',
+        };
+        guardBlocklistRef.current = next;
+        setGuardBlocklist(next);
+        setStats(prev => ({ ...prev, bannedIPs: nextCount }));
+      }
+
+      if (msg.type === 'radar_ban' || msg.type === 'radar_mode_changed') {
+        refreshGuardBlocklistSummary();
+      }
+
       if (msg.type === 'command_result') {
         const pending = pendingCmds.current.get(msg.cmdId);
         if (pending) {
@@ -319,9 +383,27 @@ export function TelemetryProvider({ token, children }) {
       pendingCmds.current.clear();
       const delay = Math.min(1000 * Math.pow(2, retryCount.current), 10000);
       retryCount.current += 1;
-      retryTimer.current = setTimeout(connect, delay);
+      retryTimer.current = setTimeout(() => connectRef.current?.(), delay);
     };
-  }, [token, processStatsUpdate]);
+  }, [token, processStatsUpdate, refreshGuardBlocklistSummary]);
+
+  useEffect(() => {
+    connectRef.current = connect;
+  }, [connect]);
+
+  useEffect(() => {
+    if (!token) {
+      return undefined;
+    }
+
+    unmounted.current = false;
+    const initial = setTimeout(refreshGuardBlocklistSummary, 0);
+    const id = setInterval(refreshGuardBlocklistSummary, 5000);
+    return () => {
+      clearTimeout(initial);
+      clearInterval(id);
+    };
+  }, [token, refreshGuardBlocklistSummary]);
 
   useEffect(() => {
     unmounted.current = false;
@@ -396,8 +478,10 @@ export function TelemetryProvider({ token, children }) {
     connHistory,
     logs,
     trafficEvents,
+    guardBlocklist,
     lastUpdateMs,
     sendCommand,
+    refreshGuardBlocklistSummary,
     isConnected: agentStatus === 'CONNECTED',
     commandReady: agentStatus === 'CONNECTED' && wsState === 'open',
   };
