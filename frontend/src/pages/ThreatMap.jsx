@@ -107,7 +107,7 @@ export default function ThreatMap({ token }) {
                  <div style={{ display: 'flex', flexDirection: 'column' }}>
                    <span style={{ color: getColor(item.action, item.score), fontWeight: 'bold', fontSize: '0.85rem' }}>{item.ip}</span>
                    <span style={{ fontSize: '0.7rem', color: '#888', marginTop: '4px' }}>
-                     {item.country !== 'Unknown' ? \`📍 \${item.country}\` : '🌐 Unknown'} • {item.reason}
+                     {item.country !== 'Unknown' ? `📍 ${item.country}` : '🌐 Unknown'} • {item.reason}
                    </span>
                  </div>
                  <div style={{ textAlign: 'right' }}>
