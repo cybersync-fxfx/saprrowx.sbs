@@ -72,13 +72,13 @@ function App() {
       <div style={{
         display: 'flex', flexDirection: 'column',
         height: '100vh', justifyContent: 'center', alignItems: 'center',
-        background: '#030305', color: '#3b82f6',
+        background: '#030305', color: '#289912',
         fontFamily: "'JetBrains Mono', monospace", gap: '16px'
       }}>
         <div style={{
           width: '40px', height: '40px',
-          border: '2px solid rgba(59,130,246,0.2)',
-          borderTop: '2px solid #3b82f6',
+          border: '2px solid rgba(40,153,18,0.22)',
+          borderTop: '2px solid #289912',
           borderRadius: '50%',
           animation: 'spin 0.8s linear infinite'
         }} />

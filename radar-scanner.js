@@ -564,6 +564,21 @@ class RadarScanner {
       return;
     }
 
+    // 1. Add to Sparrowx XDP eBPF map for instant hardware-level dropping (Phase 1)
+    try {
+      const parts = ip.split('.');
+      if (parts.length === 4) {
+        // Convert IP parts into hex string for bpftool (e.g. 192.168.1.1 -> c0 a8 01 01)
+        const hexIp = parts.map(p => parseInt(p, 10).toString(16).padStart(2, '0')).join(' ');
+        // Inject directly into the eBPF map. 01 00 00 00 represents the value '1' indicating banned
+        const bpfCmd = `bpftool map update pinned /sys/fs/bpf/sparrowx_blacklist key hex ${hexIp} value hex 01 00 00 00 2>/dev/null || true`;
+        execSync(bpfCmd);
+      }
+    } catch (e) {
+      console.error('[Radar] XDP Engine Map update error:', e.message);
+    }
+
+    // 2. Also add to nftables as a fallback/redundancy
     execSync(`NFT_TABLE=$(nft list table inet detroit_guard >/dev/null 2>&1 && echo detroit_guard || (nft list table inet sbs_filter >/dev/null 2>&1 && echo sbs_filter || echo sparrowx_guard)); nft add element inet $NFT_TABLE blacklist { ${ip} } 2>/dev/null || true`);
   }
 }

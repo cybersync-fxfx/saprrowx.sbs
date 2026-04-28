@@ -1,8 +1,8 @@
-/* Landing.css — Ultra-dark black + Blue brand */
+/* Landing.css - Ultra-dark black + red/green brand */
 .landing-body {
   min-height: 100vh;
   background-color: #030305;
-  color: #f0f4ff;
+  color: #f3fff0;
   overflow-x: hidden;
   position: relative;
   z-index: 1;
@@ -21,13 +21,13 @@
 .bg-glow-blue {
   top: -200px;
   left: -200px;
-  background: #3b82f6;
+  background: #e11d2e;
 }
 
 .bg-glow-cyan {
   bottom: -200px;
   right: -200px;
-  background: #60a5fa;
+  background: #289912;
 }
 
 .content-wrapper {
@@ -49,9 +49,9 @@
 }
 
 .brand-icon {
-  color: #3b82f6;
+  color: #289912;
   margin-bottom: 20px;
-  filter: drop-shadow(0 0 20px rgba(59, 130, 246, 0.4));
+  filter: drop-shadow(0 0 20px rgba(40, 153, 18, 0.42));
   cursor: pointer;
   transition: transform 0.3s ease;
 }
@@ -66,12 +66,12 @@
   letter-spacing: -1px;
   margin-bottom: 15px;
   color: #ffffff;
-  text-shadow: 0 0 20px rgba(59, 130, 246, 0.3);
+  text-shadow: 0 0 20px rgba(40, 153, 18, 0.34);
 }
 
 .brand-subtitle {
   font-size: 1.2rem;
-  color: #64748b;
+  color: #73806f;
   font-weight: 400;
 }
 
@@ -87,10 +87,10 @@
   display: flex;
   align-items: center;
   padding: 24px 30px;
-  background: rgba(8, 12, 24, 0.7);
-  border: 1px solid rgba(59, 130, 246, 0.2);
+  background: rgba(7, 11, 7, 0.74);
+  border: 1px solid rgba(40, 153, 18, 0.24);
   text-decoration: none;
-  color: #f0f4ff;
+  color: #f3fff0;
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   position: relative;
   overflow: hidden;
@@ -101,34 +101,34 @@
   content: '';
   position: absolute;
   top: 0; left: 0; bottom: 0; width: 3px;
-  background: #64748b;
+  background: #73806f;
   transition: all 0.3s ease;
 }
 
 .redirect-card:hover {
-  background: rgba(15, 20, 40, 0.9);
-  border-color: rgba(59, 130, 246, 0.5);
+  background: rgba(10, 17, 10, 0.92);
+  border-color: rgba(40, 153, 18, 0.56);
   transform: translateY(-4px);
-  box-shadow: 0 15px 30px rgba(0, 0, 0, 0.6), 0 0 20px rgba(59, 130, 246, 0.1);
+  box-shadow: 0 15px 30px rgba(0, 0, 0, 0.62), 0 0 20px rgba(40, 153, 18, 0.13);
 }
 
 .redirect-card:hover::before {
-  background: #3b82f6;
+  background: #289912;
   width: 6px;
 }
 
 .primary-card {
-  border-color: rgba(59, 130, 246, 0.35);
+  border-color: rgba(40, 153, 18, 0.42);
 }
 .primary-card::before {
-  background: #3b82f6;
+  background: #289912;
 }
 
 .card-icon-wrapper {
-  background: rgba(59, 130, 246, 0.06);
+  background: rgba(40, 153, 18, 0.08);
   padding: 16px;
   margin-right: 20px;
-  color: #3b82f6;
+  color: #289912;
 }
 
 .card-content {
@@ -144,15 +144,15 @@
 
 .card-content p {
   font-size: 0.95rem;
-  color: #64748b;
+  color: #73806f;
 }
 
 .link-icon {
-  color: #64748b;
+  color: #73806f;
   transition: color 0.3s, transform 0.3s;
 }
 
 .redirect-card:hover .link-icon {
-  color: #3b82f6;
+  color: #289912;
   transform: translateX(4px) translateY(-4px);
 }

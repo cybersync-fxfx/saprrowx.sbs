@@ -66,7 +66,7 @@ export default function Dashboard({ token }) {
     labels: Array(CHART_POINTS).fill(''),
     datasets: [
       {
-        label: 'CPU %', borderColor: '#3b82f6', backgroundColor: 'rgba(59,130,246,0.08)',
+        label: 'CPU %', borderColor: '#289912', backgroundColor: 'rgba(40,153,18,0.1)',
         borderWidth: 1.5, tension: 0.4, fill: true, data: cpuHistory.cpu, pointRadius: 0,
       },
       {
@@ -80,11 +80,11 @@ export default function Dashboard({ token }) {
     labels: Array(CHART_POINTS).fill(''),
     datasets: [
       {
-        label: 'In (Mbps)', borderColor: '#3b82f6', backgroundColor: 'rgba(59,130,246,0.08)',
+        label: 'In (Mbps)', borderColor: '#289912', backgroundColor: 'rgba(40,153,18,0.1)',
         borderWidth: 1.5, tension: 0.4, fill: true, data: netHistory.inb, pointRadius: 0,
       },
       {
-        label: 'Out (Mbps)', borderColor: '#60a5fa', backgroundColor: 'rgba(96,165,250,0.08)',
+        label: 'Out (Mbps)', borderColor: '#55c934', backgroundColor: 'rgba(85,201,52,0.09)',
         borderWidth: 1.5, tension: 0.4, fill: true, data: netHistory.out, pointRadius: 0,
       },
     ],
@@ -315,7 +315,7 @@ export default function Dashboard({ token }) {
     scales: {
       y: {
         min: 0, ...(maxY ? { max: maxY } : {}),
-        grid: { color: 'rgba(59,130,246,0.08)' },
+        grid: { color: 'rgba(40,153,18,0.1)' },
         ticks: { color: '#64748b', font: { family: 'JetBrains Mono', size: 10 }, callback: v => `${v}${yLabel}` }
       },
       x: { grid: { display: false }, ticks: { display: false } }
