@@ -169,6 +169,8 @@ const buildRuntimeSnapshot = () => ({
   updatedAt: new Date().toISOString(),
   profileTunnelStatus: db.profileTunnelStatus || {},
   lastStats: db.lastStats || {},
+  sbsBanTotal: Number(db.sbsBanTotal || 0),
+  sbsBanTotalUpdatedAt: db.sbsBanTotalUpdatedAt || null,
   commandLedger: Object.values(commandLedger)
     .sort((a, b) => Date.parse(b.completedAt || b.dispatchedAt || b.createdAt || 0) - Date.parse(a.completedAt || a.dispatchedAt || a.createdAt || 0))
     .slice(0, 500),
@@ -190,6 +192,8 @@ const restoreRuntimeSnapshot = () => {
     const parsed = JSON.parse(raw);
     db.profileTunnelStatus = parsed.profileTunnelStatus || {};
     db.lastStats = parsed.lastStats || {};
+    db.sbsBanTotal = Number(parsed.sbsBanTotal || 0);
+    db.sbsBanTotalUpdatedAt = parsed.sbsBanTotalUpdatedAt || null;
     const restoredLedger = Array.isArray(parsed.commandLedger) ? parsed.commandLedger : [];
     commandLedger = {};
     restoredLedger.forEach((entry) => {
@@ -658,12 +662,14 @@ function getGuardBlocklistSummary(maxAgeMs = GUARD_BLOCKLIST_CACHE_MS) {
 function addGuardBlockedIp(ip) {
   const safeIp = assertValidIpv4(ip);
   const target = ensureGuardBlacklistSet();
+  let changed = true;
   try {
     execNft(['add', 'element', target.family, target.table, 'blacklist', `{ ${safeIp} }`]);
   } catch (err) {
     if (!/File exists/i.test(err.message)) throw err;
+    changed = false;
   }
-  return listGuardBlockedIps();
+  return { ...listGuardBlockedIps(), changed };
 }
 
 function removeGuardBlockedIp(ip) {
@@ -675,6 +681,23 @@ function removeGuardBlockedIp(ip) {
     if (!/No such file or directory|Could not process rule/i.test(err.message)) throw err;
   }
   return listGuardBlockedIps();
+}
+
+function recordSbsBan(result, source, ip) {
+  const changed = result?.changed !== false;
+  if (changed) {
+    db.sbsBanTotal = Number(db.sbsBanTotal || 0) + 1;
+    db.sbsBanTotalUpdatedAt = new Date().toISOString();
+    persistRuntimeSnapshot();
+  }
+
+  return {
+    totalBanned: Number(db.sbsBanTotal || 0),
+    totalBannedUpdatedAt: db.sbsBanTotalUpdatedAt || null,
+    counted: changed,
+    source,
+    ip,
+  };
 }
 
 async function syncTunnelProfileStatus(agentId, nextStatus, clientIp = null) {
