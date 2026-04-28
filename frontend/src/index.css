@@ -1,37 +1,37 @@
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Outfit:wght@300;400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
 
 :root {
-  --bg-dark: #0b0f19;
-  --bg-alt: #111827;
-  --panel-bg: rgba(17, 24, 39, 0.75);
-  --panel-strong: rgba(15, 23, 42, 0.95);
-  --panel-border: rgba(56, 189, 248, 0.25);
-  --panel-border-strong: rgba(56, 189, 248, 0.5);
-  --panel-border-glow: rgba(56, 189, 248, 0.7);
+  --bg-dark: #000000;
+  --bg-alt: #050505;
+  --panel-bg: rgba(20, 20, 20, 0.6);
+  --panel-strong: rgba(30, 30, 30, 0.8);
+  --panel-border: rgba(180, 180, 180, 0.25); /* Ash/White outlines */
+  --panel-border-strong: rgba(220, 220, 220, 0.6);
+  --panel-border-glow: rgba(255, 26, 26, 0.6); /* Red glow interaction */
   
-  --accent-cyan: #38bdf8;
-  --accent-glow: rgba(56, 189, 248, 0.4);
-  --accent-blue: #0ea5e9;
+  --accent-cyan: #ff1a1a; /* Main tech red */
+  --accent-glow: rgba(255, 26, 26, 0.4);
+  --accent-blue: #cc0000;
   
-  --danger-red: #ef4444;
-  --danger-glow: rgba(239, 68, 68, 0.4);
+  --danger-red: #ff0000;
+  --danger-glow: rgba(255, 0, 0, 0.6);
   
-  --success-green: #10b981;
-  --success-glow: rgba(16, 185, 129, 0.36);
+  --success-green: #2ecc71;
+  --success-glow: rgba(46, 204, 113, 0.36);
   
-  --warn-amber: #f59e0b;
+  --warn-amber: #f39c12;
   
-  --text-main: #f8fafc;
-  --text-soft: #cbd5e1;
-  --text-muted: #64748b;
-  --text-dim: #475569;
+  --text-main: #ffffff;
+  --text-soft: #d4d4d4; /* Ash */
+  --text-muted: #888888;
+  --text-dim: #444444;
   
-  --shadow-lg: 0 0px 30px rgba(15, 23, 42, 0.5);
-  --shadow-sm: 0 0px 15px rgba(15, 23, 42, 0.3);
+  --shadow-lg: 0 0px 30px rgba(0, 0, 0, 0.9);
+  --shadow-sm: 0 0px 15px rgba(0, 0, 0, 0.5);
   --shadow-glow: 0 0 20px var(--accent-glow);
   
-  --font-body: 'Plus Jakarta Sans', sans-serif;
-  --font-display: 'Outfit', sans-serif;
+  --font-body: 'JetBrains Mono', monospace;
+  --font-display: 'JetBrains Mono', monospace;
   --font-mono: 'JetBrains Mono', monospace;
   
   --glass-blur: blur(0px);
@@ -47,9 +47,9 @@ html, body, #root {
 body {
   background-color: var(--bg-dark);
   background-image: 
-    radial-gradient(circle at 15% 50%, rgba(56, 189, 248, 0.05), transparent 30%),
-    radial-gradient(circle at 85% 30%, rgba(14, 165, 233, 0.04), transparent 30%),
-    linear-gradient(180deg, var(--bg-dark) 0%, #020617 100%);
+    radial-gradient(circle at 15% 50%, rgba(255, 26, 26, 0.08), transparent 25%),
+    radial-gradient(circle at 85% 30%, rgba(180, 180, 180, 0.05), transparent 25%),
+    linear-gradient(180deg, #000000 0%, #030303 100%);
   color: var(--text-main);
   font-family: var(--font-body);
   overflow-x: hidden;
@@ -66,8 +66,8 @@ body::before {
   position: fixed;
   inset: 0;
   background-image: 
-    linear-gradient(to right, rgba(56, 189, 248, 0.04) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(56, 189, 248, 0.04) 1px, transparent 1px);
+    linear-gradient(to right, rgba(180, 180, 180, 0.05) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(180, 180, 180, 0.05) 1px, transparent 1px);
   background-size: 40px 40px;
   mask-image: radial-gradient(circle at center, black 50%, transparent 90%);
   z-index: -2;
@@ -330,7 +330,7 @@ button.danger:hover:not(:disabled) {
 .status-pill::before {
   content: '';
   width: 8px; height: 8px;
-  border-radius: 50%;
+  border-radius: 0;
   background: currentColor;
 }
 
@@ -450,7 +450,7 @@ button.danger:hover:not(:disabled) {
   background: var(--accent-cyan);
   transform: scaleY(0);
   transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  border-radius: 0 4px 4px 0;
+  border-radius: 0;
   box-shadow: 0 0 10px var(--accent-cyan);
 }
 
@@ -964,7 +964,7 @@ button.danger:hover:not(:disabled) {
   font-size: 0.72rem;
   font-weight: 600;
   padding: 1px 6px;
-  border-radius: 3px;
+  border-radius: 0;
   cursor: pointer;
   user-select: none;
   position: relative;
@@ -1305,11 +1305,11 @@ tr:hover td {
 
 /* Theme Overrides */
 * {
-  border-radius: 0px !important;
+  border-radius: 0;
 }
 
 .glass-panel, .hero-panel, input, select, button, .action-card, .metric-card, .terminal-log, .table-shell {
-  border-radius: 0 !important;
+  border-radius: 0;
   box-shadow: none !important;
   border-color: var(--panel-border) !important;
 }
