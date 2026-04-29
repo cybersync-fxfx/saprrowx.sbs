@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { TelemetryProvider } from './context/TelemetryContext';
 import Landing  from './pages/Landing';
 import Auth     from './pages/Auth';
+import Docs     from './pages/Docs';
 import Layout   from './components/Layout';
 import Dashboard from './pages/Dashboard';
 import Terminal  from './pages/Terminal';
@@ -94,6 +95,7 @@ function App() {
   return (
     <BrowserRouter>
       <Routes>
+        <Route path="/docs" element={<Docs />} />
         {!token ? (
           <>
             <Route path="/"      element={<Landing />} />

@@ -34,7 +34,7 @@ export default function Landing() {
             <ExternalLink size={20} className="link-icon" />
           </div>
 
-          <a href="#" className="redirect-card">
+          <div onClick={() => navigate('/docs')} className="redirect-card pointer" style={{ cursor: 'pointer' }}>
             <div className="card-icon-wrapper">
               <Terminal size={24} />
             </div>
@@ -43,7 +43,7 @@ export default function Landing() {
               <p>Integration guides and API references</p>
             </div>
             <ExternalLink size={20} className="link-icon" />
-          </a>
+          </div>
 
           <a href="#" className="redirect-card">
             <div className="card-icon-wrapper">
