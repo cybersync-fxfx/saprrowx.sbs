@@ -2294,6 +2294,25 @@ async function applyRadarAutoBan(ip, reason, metrics = {}) {
   });
 }
 
+async function fetchGlobalBannedTotal() {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('threat_radar')
+      .select('ip')
+      .eq('action', 'banned');
+    
+    if (!error && data) {
+      const uniqueIps = new Set(data.map(row => String(row.ip || '').trim()).filter(Boolean));
+      db.sbsBanTotal = uniqueIps.size;
+      db.sbsBanTotalUpdatedAt = new Date().toISOString();
+    }
+  } catch (e) {
+    console.error('[Supabase] fetchGlobalBannedTotal error:', e.message);
+  }
+}
+fetchGlobalBannedTotal();
+setInterval(fetchGlobalBannedTotal, 15000);
+
 // -- Radar Scanner Integration --------------------------------
 const RadarScanner = require('./radar-scanner');
 radar = new RadarScanner(supabaseAdmin, {
