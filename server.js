@@ -91,9 +91,8 @@ app.use((req, res, next) => {
   res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
   next();
 });
-if (fs.existsSync(FRONTEND_INDEX_PATH)) {
-  app.use(express.static(FRONTEND_DIST_DIR));
-} else {
+app.use(express.static(FRONTEND_DIST_DIR));
+if (!fs.existsSync(FRONTEND_INDEX_PATH)) {
   console.warn('\x1b[33m[!] Frontend build not found. Run npm run build before serving the panel UI.\x1b[0m');
 }
 
