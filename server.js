@@ -2249,7 +2249,7 @@ async function setupTunnel(req, res, agentId, clientIp, options = {}) {
   } catch (err) {
     console.error(`[tunnel] Tunnel creation failed for agent ${agentId}:`, err);
     res.status(500).json({ 
-      error: 'Tunnel creation failed', 
+      error: `Tunnel creation failed: ${err.stderr ? String(err.stderr).trim() : (err.stdout ? String(err.stdout).trim() : err.message)}`, 
       message: err.message
     });
   }
