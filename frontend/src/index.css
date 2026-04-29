@@ -1298,7 +1298,50 @@ tr:hover td {
   .page-title { font-size: 2.2rem; }
 }
 
+@media (max-width: 500px) {
+  .sidebar {
+    padding: 12px 10px;
+  }
+  .sidebar-nav {
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 6px;
+  }
+  .nav-link {
+    font-size: 0.75rem;
+    padding: 6px 12px;
+    border: 1px solid rgba(255,26,26,0.2);
+    background: rgba(0,0,0,0.4);
+  }
+  .nav-link:hover {
+    transform: none;
+  }
+  .topbar {
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    text-align: center;
+  }
+  .topbar-meta {
+    justify-content: center;
+  }
+  .page-shell {
+    gap: 12px;
+  }
+  .hero-panel {
+    padding: 16px 12px;
+  }
+  .page-title {
+    font-size: 1.6rem;
+  }
+  .traffic-summary-chips {
+    justify-content: center;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
+
   *,
   *::before,
   *::after {
