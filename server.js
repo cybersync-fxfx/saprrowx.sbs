@@ -1904,6 +1904,8 @@ echo "=============================================="
 app.post('/api/agent/register', agentAuthMiddleware, (req, res) => {
   const { agentId } = req.user;
   const requestIp = normalizeIp(req.headers['x-forwarded-for'] || req.socket.remoteAddress);
+  const wasOffline = !db.agents[agentId] || (Date.now() - (db.agents[agentId].lastSeen || 0)) > 60000;
+  
   const agent = upsertAgentState(agentId, {
     userId: req.user.id,
     hostname: req.body.hostname,
@@ -1914,7 +1916,8 @@ app.post('/api/agent/register', agentAuthMiddleware, (req, res) => {
   console.log(`[agent] Registered ${agentId} from ${agent.ip} (${agent.hostname || 'unknown-host'})`);
   broadcastToUser(req.user.id, buildAgentConnectedMessage(agent));
   
-  sendDiscordWebhook('newClient', {
+  if (wasOffline) {
+    sendDiscordWebhook('newClient', {
     embeds: [{
       title: '🔌 New Agent Connected',
       color: 3447003,
@@ -1929,6 +1932,7 @@ app.post('/api/agent/register', agentAuthMiddleware, (req, res) => {
       footer: { text: 'Sparrowx Fleet Management' }
     }]
   });
+  }
   res.json({ success: true });
 });
 
