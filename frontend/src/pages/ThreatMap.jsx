@@ -59,9 +59,12 @@ export default function ThreatMap({ token }) {
     return () => clearInterval(timer);
   }, [data.liveScores]);
 
-  // Scroll terminal to bottom
+  // Scroll terminal to bottom WITHOUT scrolling page
   useEffect(() => {
-    logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (logEndRef.current) {
+      const parent = logEndRef.current.parentNode;
+      if (parent) parent.scrollTop = parent.scrollHeight;
+    }
   }, [terminalLogs]);
 
   const liveScores = data.liveScores;
