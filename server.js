@@ -2165,7 +2165,9 @@ async function setupTunnel(req, res, agentId, clientIp, options = {}) {
 
   try {
     const existingState = getTunnelRuntimeState(agentId);
-    if (!options.force && shouldReuseTunnelSetup(existingState, options.source)) {
+    const ipChanged = clientIp && existingState.tunnelConfig?.clientPublicIp && clientIp !== existingState.tunnelConfig.clientPublicIp;
+    
+    if (!options.force && !ipChanged && shouldReuseTunnelSetup(existingState, options.source)) {
       const nextStatus = existingState.status === 'active' ? 'active' : 'provisioning';
       await syncTunnelProfileStatus(agentId, nextStatus, clientIp);
 
@@ -2204,6 +2206,8 @@ async function setupTunnel(req, res, agentId, clientIp, options = {}) {
         clientPublicKey: clientKeys.pub,
         listenPort: 51820 + (getTunnelConfig(agentId)?.subnetIndex || 0), // Spread ports if needed
       });
+    } else if (tunnelConfig.clientPublicIp !== clientIp) {
+      tunnelConfig = getOrAllocateTunnelConfig(agentId, { clientPublicIp: clientIp });
     }
 
     // 1. Setup Guard side
