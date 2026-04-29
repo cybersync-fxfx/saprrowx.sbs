@@ -1,7 +1,7 @@
 .env
 node_modules/
 frontend/node_modules/
-frontend/dist/
+# frontend/dist/ removed for direct deployment
 server-start.out.txt
 server-start.err.txt
 state/
