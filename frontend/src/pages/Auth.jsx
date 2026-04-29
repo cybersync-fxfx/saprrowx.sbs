@@ -138,7 +138,7 @@ export default function Auth({ setToken }) {
 
               <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
                 <div>
-                  <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '8px', fontWeight: 'bold', letterSpacing: '1px' }}>{tab === 'login' ? 'EMAIL OR USERNAME' : 'USERNAME'}</label>
+                  <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '8px', fontWeight: 'bold', letterSpacing: '1px' }}>{tab === 'login' ? 'EMAIL ADDRESS' : 'USERNAME'}</label>
                   <input type="text" required value={user} onChange={(e) => setUser(e.target.value)} style={{ padding: '14px 16px' }} />
                 </div>
                 
