@@ -83,6 +83,14 @@ EOF
 
     # 3. Bring interface up
     wg-quick down "$TUNNEL_NAME" 2>/dev/null || true
+
+    CONFLICTING_IFACE=$(ip -o addr show | grep "$GUARD_INTERNAL_IP" | awk '{print $2}' | head -n 1 || true)
+    if [ -n "$CONFLICTING_IFACE" ] && [ "$CONFLICTING_IFACE" != "$TUNNEL_NAME" ]; then
+      log "Removing conflicting interface $CONFLICTING_IFACE using IP $GUARD_INTERNAL_IP"
+      ip link delete dev "$CONFLICTING_IFACE" 2>/dev/null || true
+      wg-quick down "$CONFLICTING_IFACE" 2>/dev/null || true
+    fi
+
     if ! wg-quick up "$TUNNEL_NAME"; then
       log "Failed to bring up ${TUNNEL_NAME}. Check dmesg/journalctl."
       exit 1
