@@ -8,6 +8,7 @@ const GUARD_COORD = [-83.0458, 42.3314]; // Detroit Guard Node
 export default function ThreatMap({ token }) {
   const { trafficEvents } = useTelemetry();
   const [data, setData] = useState({ liveScores: [], stats: { scannedToday: 0, blockedToday: 0 } });
+  const [hoveredMarker, setHoveredMarker] = useState(null);
   const [terminalLogs, setTerminalLogs] = useState([]);
   const logEndRef = useRef(null);
   
@@ -194,18 +195,24 @@ export default function ThreatMap({ token }) {
                   />
 
                   {/* Attacker Node and HUD Overlay */}
-                  <Marker coordinates={[marker.lon, marker.lat]}>
-                    <circle r={3} fill={color} />
-                    <circle r={15} fill={color} opacity={0.3} className="ping-anim" />
+                  <Marker 
+                    coordinates={[marker.lon, marker.lat]}
+                    onMouseEnter={() => setHoveredMarker(marker.id)}
+                    onMouseLeave={() => setHoveredMarker(null)}
+                  >
+                    <circle r={4} fill={color} style={{ cursor: 'pointer' }} />
+                    <circle r={15} fill={color} opacity={0.3} className="ping-anim" style={{ pointerEvents: 'none' }} />
                     
                     {/* Floating Target HUD Data */}
-                    <g transform="translate(10, -12)" style={{ cursor: 'default', pointerEvents: 'none' }}>
-                      <rect width="125" height="35" rx="6" fill="rgba(6, 8, 12, 0.88)" stroke={color} strokeWidth="1.5" style={{ filter: 'drop-shadow(0px 4px 8px rgba(0,0,0,0.5))' }} />
-                      <text x="8" y="14" style={{ fontFamily: "monospace", fill: "#ffffff", fontSize: "9px", fontWeight: "bold" }}>{marker.ip}</text>
-                      <text x="8" y="26" style={{ fontFamily: "monospace", fill: color, fontSize: "7.5px", fontWeight: "bold", letterSpacing: '0.5px' }}>
-                        RISK: {marker.score} | {marker.action.toUpperCase()}
-                      </text>
-                    </g>
+                    {hoveredMarker === marker.id && (
+                      <g transform="translate(12, -12)" style={{ cursor: 'default', pointerEvents: 'none' }}>
+                        <rect width="125" height="35" rx="6" fill="rgba(6, 8, 12, 0.95)" stroke={color} strokeWidth="1.5" style={{ filter: 'drop-shadow(0px 4px 8px rgba(0,0,0,0.5))' }} />
+                        <text x="8" y="14" style={{ fontFamily: "monospace", fill: "#ffffff", fontSize: "9px", fontWeight: "bold" }}>{marker.ip}</text>
+                        <text x="8" y="26" style={{ fontFamily: "monospace", fill: color, fontSize: "7.5px", fontWeight: "bold", letterSpacing: '0.5px' }}>
+                          RISK: {marker.score} | {marker.action.toUpperCase()}
+                        </text>
+                      </g>
+                    )}
                   </Marker>
                 </React.Fragment>
               );
