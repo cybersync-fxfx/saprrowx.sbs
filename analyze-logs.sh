@@ -1,6 +1,6 @@
 #!/bin/bash
 # Sparrowx Daily Attack Log Analyzer
-# Parses automated threat signatures and provides interactive replay.
+# Parses automated threat signatures, provides interactive replay, and AI insights.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STORAGE_ATTACK_DIR="$SCRIPT_DIR/storage/attack"
@@ -117,7 +117,6 @@ replay_traffic() {
     if [ "$PARSE_TIME" = true ]; then
       TS=$(echo "$line" | grep -oP "^\[\K[^\]]+")
       if [ -n "$TS" ] && [ -n "$PREV_TS" ]; then
-        # Attempt to parse timestamps
         T1=$(date -d "$PREV_TS" +%s 2>/dev/null || date -j -f "%Y-%m-%dT%H:%M:%SZ" "$PREV_TS" +%s 2>/dev/null)
         T2=$(date -d "$TS" +%s 2>/dev/null || date -j -f "%Y-%m-%dT%H:%M:%SZ" "$TS" +%s 2>/dev/null)
         
@@ -143,17 +142,33 @@ replay_traffic() {
   echo ""
 }
 
+run_ai_analysis() {
+  local LOG_FILE="$1"
+  if [ ! -f "$LOG_FILE" ]; then
+    echo "Log file not found: $LOG_FILE"
+    return 1
+  fi
+
+  if ! command -v node &> /dev/null; then
+    echo "Error: Node.js is required to run AI analysis."
+    return 1
+  fi
+
+  node "$SCRIPT_DIR/ai-analyze.js" "$LOG_FILE"
+}
+
 show_menu() {
   while true; do
     echo "================================================================="
-    echo "  SPARROWX ATTACK HISTORY & TRAFFIC ANALYZER"
+    echo "  SPARROWX ATTACK HISTORY, TRAFFIC & AI ANALYZER"
     echo "================================================================="
     echo "1) Analyze Live Logs ($LIVE_LOG)"
     echo "2) Analyze Historical Attack Log (from storage/attack/)"
     echo "3) Replay Attack Traffic Timeline (Simulation)"
-    echo "4) Exit"
+    echo "4) AI Threat Intelligence Report (LLM Insights)"
+    echo "5) Exit"
     echo "================================================================="
-    read -p "Enter choice [1-4]: " CHOICE
+    read -p "Enter choice [1-5]: " CHOICE
 
     case $CHOICE in
       1)
@@ -169,7 +184,6 @@ show_menu() {
       2)
         echo "Available Historical Logs:"
         FILES=("$STORAGE_ATTACK_DIR"/*)
-        # Filter out directories and README
         VALID_FILES=()
         for f in "${FILES[@]}"; do
           if [ -f "$f" ] && [[ "$(basename "$f")" != "README.md" ]]; then
@@ -221,6 +235,53 @@ show_menu() {
         done
         ;;
       4)
+        echo "Select Log for AI Analysis:"
+        echo "a) Live Log ($LIVE_LOG)"
+        echo "b) Historical Log (from storage/attack/)"
+        read -p "Choice [a/b]: " AI_FILE_CHOICE
+        
+        local FILE_TO_AI=""
+        if [ "$AI_FILE_CHOICE" = "a" ]; then
+          if [ ! -f "$LIVE_LOG" ]; then
+            echo "Live log file not found at $LIVE_LOG"
+            read -p "Press Enter to continue..."
+            continue
+          fi
+          FILE_TO_AI="$LIVE_LOG"
+        elif [ "$AI_FILE_CHOICE" = "b" ]; then
+          FILES=("$STORAGE_ATTACK_DIR"/*)
+          VALID_FILES=()
+          for f in "${FILES[@]}"; do
+            if [ -f "$f" ] && [[ "$(basename "$f")" != "README.md" ]]; then
+              VALID_FILES+=("$f")
+            fi
+          done
+
+          if [ ${#VALID_FILES[@]} -eq 0 ]; then
+            echo "No logs found in $STORAGE_ATTACK_DIR"
+            read -p "Press Enter to continue..."
+            continue
+          fi
+          
+          PS3="Select file for AI analysis: "
+          select FILE in "${VALID_FILES[@]}"; do
+            if [ -n "$FILE" ]; then
+              FILE_TO_AI="$FILE"
+              break
+            else
+              echo "Invalid selection."
+            fi
+          done
+        else
+          echo "Invalid choice."
+          continue
+        fi
+        
+        if [ -n "$FILE_TO_AI" ]; then
+          run_ai_analysis "$FILE_TO_AI"
+        fi
+        ;;
+      5)
         exit 0
         ;;
       *)
