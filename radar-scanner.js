@@ -145,8 +145,27 @@ class RadarScanner {
     this.configPath = path.join(getTunnelStateDir(), 'radar-config.json');
     this.config = this.loadConfig();
 
-    // Dynamically whitelist Supabase address to prevent accidental core blocking
+    // Dynamically whitelist critical gateway assets (Supabase, Cloudflare, User IP)
     try {
+      const criticalCidrs = [
+        '49.43.249.32/32', // User Requested Whitelist IP
+        '173.245.48.0/20', '103.21.244.0/22', '103.22.200.0/22',
+        '103.31.4.0/22', '141.101.64.0/18', '108.162.192.0/18',
+        '190.93.240.0/20', '188.114.96.0/20', '197.234.240.0/22',
+        '198.41.128.0/17', '162.158.0.0/15', '104.16.0.0/13',
+        '104.24.0.0/14', '172.64.0.0/13', '131.0.72.0/22' // Cloudflare
+      ];
+      
+      if (!Array.isArray(this.config.whitelistCidrs)) {
+        this.config.whitelistCidrs = [];
+      }
+      
+      for (const cidr of criticalCidrs) {
+        if (!this.config.whitelistCidrs.includes(cidr)) {
+          this.config.whitelistCidrs.push(cidr);
+        }
+      }
+
       const dns = require('dns');
       const url = new URL(process.env.SUPABASE_URL || 'https://supabase.co');
       dns.lookup(url.hostname, (err, address) => {
