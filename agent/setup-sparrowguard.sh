@@ -3,7 +3,7 @@ set -euo pipefail
 
 ENV_FILE="${SPARROWX_TUNNEL_ENV_FILE:-${SBS_TUNNEL_ENV_FILE:-/opt/sbs-agent/tunnel.env}}"
 LOG_FILE="${SPARROWX_TUNNEL_LOG_FILE:-${SBS_TUNNEL_LOG_FILE:-/var/log/sbs/agent.log}}"
-CONFIG_DIR="/etc/sparrowguard"
+CONFIG_DIR="/etc/wireguard"
 
 trim_cr() {
   printf '%s' "${1%$'\r'}"
