@@ -960,6 +960,9 @@ ${logContent}`;
     });
 
     if (!response.ok) {
+      const errText = await response.text();
+      console.error('[Gemini Primary Error]:', errText);
+      
       // Try fallback to gemini-1.5-flash
       const fallbackUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
       const fbResponse = await fetch(fallbackUrl, {
@@ -971,8 +974,11 @@ ${logContent}`;
       });
 
       if (!fbResponse.ok) {
-        throw new Error('Gemini API error');
+        const fbErrText = await fbResponse.text();
+        console.error('[Gemini Fallback Error]:', fbErrText);
+        throw new Error(`Gemini API error: ${fbErrText}`);
       }
+      
       const fbData = await fbResponse.json();
       const fbAnalysis = fbData.candidates?.[0]?.content?.parts?.[0]?.text || 'No response from AI unit.';
       return res.json({ analysis: fbAnalysis });
