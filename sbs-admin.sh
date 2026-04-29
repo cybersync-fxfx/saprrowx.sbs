@@ -16,11 +16,28 @@ echo -e "${CYAN}          SBS - ADMIN ACCESS PANEL               ${RESET}"
 echo -e "${CYAN}=================================================${RESET}"
 echo ""
 
+# Load environment variables from .env
+if [ -f .env ]; then
+  export $(grep -v '^#' .env | xargs)
+elif [ -f /opt/sbs/.env ]; then
+  export $(grep -v '^#' /opt/sbs/.env | xargs)
+fi
+
+SUPABASE_KEY="${SUPABASE_SERVICE_KEY:-$SUPABASE_SERVICE_ROLE_KEY}"
+
+if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_KEY" ]; then
+  echo -e "${RED}[x] Error: SUPABASE_URL or SUPABASE_SERVICE_KEY not found in .env${RESET}"
+  echo -e "${YELLOW}Please ensure you are running this in the project root with a valid .env file.${RESET}"
+  exit 1
+fi
+
 list_users() {
-  echo -e "${WHITE}[*] Fetching users from server...${RESET}"
+  echo -e "${WHITE}[*] Fetching users from Supabase...${RESET}"
   echo ""
   
-  USERS_JSON=$(curl -s http://127.0.0.1:3001/api/internal/users)
+  USERS_JSON=$(curl -s -X GET "${SUPABASE_URL}/rest/v1/user_profiles?select=id,username,role,status,agent_id" \
+    -H "apikey: ${SUPABASE_KEY}" \
+    -H "Authorization: Bearer ${SUPABASE_KEY}")
   
   if [ -z "$USERS_JSON" ] || [[ "$USERS_JSON" == *"error"* ]]; then
     echo -e "${RED}[x] Failed to fetch users.${RESET}"
@@ -60,11 +77,13 @@ update_status() {
   
   echo -e "${YELLOW}[->] Updating ${username} status to ${status}...${RESET}"
   
-  RESPONSE=$(curl -s -X POST http://127.0.0.1:3001/api/internal/users/status \
+  RESPONSE=$(curl -s -X PATCH "${SUPABASE_URL}/rest/v1/user_profiles?username=eq.${username}" \
+    -H "apikey: ${SUPABASE_KEY}" \
+    -H "Authorization: Bearer ${SUPABASE_KEY}" \
     -H "Content-Type: application/json" \
-    -d "{\"username\": \"${username}\", \"status\": \"${status}\"}")
+    -d "{\"status\": \"${status}\"}")
     
-  if [[ "$RESPONSE" == *"success\":true"* ]]; then
+  if [ -z "$RESPONSE" ] || [[ "$RESPONSE" != *"error"* ]]; then
     echo -e "${GREEN}[ok] User ${username} access updated to ${status}.${RESET}"
   else
     echo -e "${RED}[x] Failed to update user.${RESET}"
