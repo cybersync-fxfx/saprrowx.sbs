@@ -115,7 +115,7 @@ export default function Docs() {
               </div>
               <div className="info-card">
                 <h4><CheckCircle size={18} style={{ color: '#289912' }} /> Smart Tunnels</h4>
-                <p>Encrypted mesh networking powered by high-performance WireGuard.</p>
+                <p>Encrypted mesh networking powered by SparrowGuard core architecture.</p>
               </div>
             </div>
           </section>
@@ -153,7 +153,7 @@ export default function Docs() {
           {/* Configuration */}
           <section id="configuration" className="docs-section">
             <h2><Settings /> Configuration</h2>
-            <p>Manage your deployment by modifying the environment configuration located at <code>/opt/sbs-agent/.env</code>.</p>
+            <p>Manage your deployment by modifying the environment configuration located at <code>/opt/sparrowx-agent/.env</code>.</p>
             
             <div className="info-grid">
               <div className="info-card">
@@ -173,9 +173,9 @@ export default function Docs() {
             <p>Common deployment errors and immediate resolution instructions.</p>
 
             <div className="trouble-item">
-              <div className="trouble-header">Error: WireGuard Interface not found</div>
+              <div className="trouble-header">Error: SparrowGuard secure network mapping not found</div>
               <div className="trouble-fix">
-                Run <code>sudo apt-get install wireguard</code> to guarantee essential kernel modules are available.
+                Validate virtual device interface parameters locally.
               </div>
             </div>
 

@@ -40,7 +40,7 @@ const {
   releaseTunnelConfig,
   getTunnelStatePath,
   tunnelNameForAgent,
-} = require('./tunnel-config');
+} = require('./sparrowguard-config');
 
 const app = express();
 const server = http.createServer(app);
@@ -238,15 +238,15 @@ scheduleDailyLogReset();
 
 const ipv4Pattern = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/;
 const CLIENT_TUNNEL_SCRIPT_SOURCE = fs
-  .readFileSync(path.join(__dirname, 'agent', 'setup-tunnel-client.sh'), 'utf8')
+  .readFileSync(path.join(__dirname, 'agent', 'setup-sparrowguard.sh'), 'utf8')
   .replace(/\r\n/g, '\n');
 const AGENT_BUNDLE_VERSION = '2026-04-27-sparrowx-1';
 const AGENT_UPDATE_SCRIPT_SOURCE = fs
-  .readFileSync(path.join(__dirname, 'agent', 'sbs-agent.sh'), 'utf8')
+  .readFileSync(path.join(__dirname, 'agent', 'sparrow-node.sh'), 'utf8')
   .replace(/\r\n/g, '\n');
 
 const CLIENT_TUNNEL_SERVICE_UNIT = `[Unit]
-Description=Sparrowx Client WireGuard Tunnel
+Description=SparrowGuard Node Protection
 After=network-online.target
 Wants=network-online.target
 
@@ -254,8 +254,8 @@ Wants=network-online.target
 Type=oneshot
 RemainAfterExit=yes
 EnvironmentFile=/opt/sbs-agent/tunnel.env
-ExecStart=/opt/sbs-agent/setup-tunnel-client.sh apply
-ExecStop=/opt/sbs-agent/setup-tunnel-client.sh remove
+ExecStart=/opt/sbs-agent/setup-sparrowguard.sh apply
+ExecStop=/opt/sbs-agent/setup-sparrowguard.sh remove
 StandardOutput=append:/var/log/sbs/agent.log
 StandardError=append:/var/log/sbs/agent.log
 
@@ -495,10 +495,10 @@ const buildClientTunnelBootstrapCommand = (tunnelConfig) => {
   return `
 mkdir -p /opt/sbs-agent /var/log/sbs
 touch /var/log/sbs/agent.log
-cat <<'TUNNEL_SCRIPT_EOF' > /opt/sbs-agent/setup-tunnel-client.sh
+cat <<'TUNNEL_SCRIPT_EOF' > /opt/sbs-agent/setup-sparrowguard.sh
 ${CLIENT_TUNNEL_SCRIPT_SOURCE}
 TUNNEL_SCRIPT_EOF
-chmod +x /opt/sbs-agent/setup-tunnel-client.sh
+chmod +x /opt/sbs-agent/setup-sparrowguard.sh
 cat <<'TUNNEL_ENV_EOF' > /opt/sbs-agent/tunnel.env
 SPARROWX_TUNNEL_NAME=${tunnelConfig.tunnelName}
 SPARROWX_GUARD_PUBLIC_IP=${tunnelConfig.guardPublicIp}
@@ -522,7 +522,7 @@ TUNNEL_ENV_EOF
 cat <<'TUNNEL_UNIT_EOF' > /etc/systemd/system/sbs-tunnel.service
 ${CLIENT_TUNNEL_SERVICE_UNIT}
 TUNNEL_UNIT_EOF
-sed -i 's/\r$//' /opt/sbs-agent/setup-tunnel-client.sh /opt/sbs-agent/tunnel.env /etc/systemd/system/sbs-tunnel.service
+sed -i 's/\r$//' /opt/sbs-agent/setup-sparrowguard.sh /opt/sbs-agent/tunnel.env /etc/systemd/system/sbs-tunnel.service
 systemctl daemon-reload
 systemctl enable sbs-tunnel.service
 systemctl reset-failed sbs-tunnel.service || true
@@ -538,8 +538,8 @@ const buildClientTunnelRemovalCommand = () => `
 if systemctl list-unit-files sbs-tunnel.service >/dev/null 2>&1; then
   systemctl disable --now sbs-tunnel.service || systemctl stop sbs-tunnel.service || true
 fi
-if [ -f /opt/sbs-agent/setup-tunnel-client.sh ]; then
-  /opt/sbs-agent/setup-tunnel-client.sh remove || true
+if [ -f /opt/sbs-agent/setup-sparrowguard.sh ]; then
+  /opt/sbs-agent/setup-sparrowguard.sh remove || true
 fi
 rm -f /opt/sbs-agent/tunnel.env
 rm -f /etc/systemd/system/sbs-tunnel.service

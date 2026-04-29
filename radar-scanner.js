@@ -1,7 +1,7 @@
 const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
-const { getTunnelStateDir, listTunnelConfigs } = require('./tunnel-config');
+const { getTunnelStateDir, listTunnelConfigs } = require('./sparrowguard-config');
 const geoip = require('geoip-lite');
 
 function envCompat(primaryName, legacyName, fallback = '') {
