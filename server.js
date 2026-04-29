@@ -48,6 +48,38 @@ const wss = new WebSocket.Server({ server });
 const FRONTEND_DIST_DIR = path.join(__dirname, 'frontend', 'dist');
 const FRONTEND_INDEX_PATH = path.join(FRONTEND_DIST_DIR, 'index.html');
 
+const DISCORD_WEBHOOKS = {
+  blockBan: 'https://discord.com/api/webhooks/1499017546836476015/jmRXGwbDjn29v-jexmhIB2EoASy2DKztnsDDcjPh2As4fUYp6beZvT4vPXi6CvyoOmnc',
+  attack: 'https://discord.com/api/webhooks/1499017771911217304/vgAvLNMV9UoFpWy95t0d8HQDwDe7HlwUswtFVKXVECV0aF6lCu1Rx6pYGK7aKLJGSWi8',
+  newClient: 'https://discord.com/api/webhooks/1499017771911217304/vgAvLNMV9UoFpWy95t0d8HQDwDe7HlwUswtFVKXVECV0aF6lCu1Rx6pYGK7aKLJGSWi8',
+  info: 'https://discord.com/api/webhooks/1499018562688258162/LVVH6V2euBv0YB0fNwFD5cU75haNe4wFUMU5m79d7rBhcr8NxUzNrybrLCSh4ZV5t79V'
+};
+
+function sendDiscordWebhook(type, payload) {
+  const url = DISCORD_WEBHOOKS[type];
+  if (!url) return;
+
+  const https = require('https');
+  const data = JSON.stringify(payload);
+
+  const req = https.request(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Content-Length': Buffer.byteLength(data)
+    }
+  }, (res) => {
+    res.on('data', () => {});
+  });
+
+  req.on('error', (e) => {
+    console.error(`[discord-webhook] Failed to send to ${type}:`, e.message);
+  });
+
+  req.write(data);
+  req.end();
+}
+
 const PORT = process.env.PORT || 3001;
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY;
@@ -951,6 +983,21 @@ app.post('/api/guard/blocklist', authMiddleware, adminMiddleware, (req, res) => 
     const banTotal = recordSbsBan(result, 'manual', ip);
     appendAttackLog(`[manual-ban] ${ip} blocked from dashboard by ${req.user.username || req.user.email || req.user.id}`);
     broadcastGlobalBan(ip);
+    
+    sendDiscordWebhook('blockBan', {
+      embeds: [{
+        title: '🛡️ IP Address Banned',
+        color: 15158332,
+        description: `An IP address has been blocked on the Guard Firewall.`,
+        fields: [
+          { name: 'IP Address', value: `\`${ip}\``, inline: true },
+          { name: 'Action Type', value: `\`manual-ban\``, inline: true },
+          { name: 'Operator', value: `\`${req.user.username || req.user.email || req.user.id}\``, inline: true }
+        ],
+        timestamp: new Date().toISOString(),
+        footer: { text: 'Sparrowx DDoS Guard' }
+      }]
+    });
     broadcastToAll({
       type: 'guard_blocklist_changed',
       count: result.ips.length,
@@ -976,6 +1023,21 @@ app.delete('/api/guard/blocklist/:ip', authMiddleware, adminMiddleware, (req, re
     const result = removeGuardBlockedIp(ip);
     appendAttackLog(`[manual-unban] ${ip} removed from dashboard by ${req.user.username || req.user.email || req.user.id}`);
     broadcastGlobalUnban(ip);
+    
+    sendDiscordWebhook('blockBan', {
+      embeds: [{
+        title: '🔓 IP Address Unbanned',
+        color: 3066993,
+        description: `An IP address has been unblocked.`,
+        fields: [
+          { name: 'IP Address', value: `\`${ip}\``, inline: true },
+          { name: 'Action Type', value: `\`manual-unban\``, inline: true },
+          { name: 'Operator', value: `\`${req.user.username || req.user.email || req.user.id}\``, inline: true }
+        ],
+        timestamp: new Date().toISOString(),
+        footer: { text: 'Sparrowx DDoS Guard' }
+      }]
+    });
     broadcastToAll({
       type: 'guard_blocklist_changed',
       count: result.ips.length,
@@ -1738,6 +1800,22 @@ app.post('/api/agent/register', agentAuthMiddleware, (req, res) => {
   });
   console.log(`[agent] Registered ${agentId} from ${agent.ip} (${agent.hostname || 'unknown-host'})`);
   broadcastToUser(req.user.id, buildAgentConnectedMessage(agent));
+  
+  sendDiscordWebhook('newClient', {
+    embeds: [{
+      title: '🔌 New Agent Connected',
+      color: 3447003,
+      description: `A new client agent has connected to the Guard Server.`,
+      fields: [
+        { name: 'Agent ID', value: `\`${agentId}\``, inline: true },
+        { name: 'Hostname', value: `\`${agent.hostname || 'unknown'}\``, inline: true },
+        { name: 'IP Address', value: `\`${agent.ip}\``, inline: true },
+        { name: 'OS', value: `\`${agent.os || 'unknown'}\``, inline: true }
+      ],
+      timestamp: new Date().toISOString(),
+      footer: { text: 'Sparrowx Fleet Management' }
+    }]
+  });
   res.json({ success: true });
 });
 
@@ -2273,6 +2351,37 @@ async function applyRadarAutoBan(ip, reason, metrics = {}) {
     `[auto-ban] ${ip} blocked by Threat Radar: ${reason} | tcp=${metrics.tcp || 0} syn=${metrics.syn || 0} udp=${metrics.udp || 0} delta=${metrics.delta || 0}`
   );
   broadcastGlobalBan(ip);
+  
+  sendDiscordWebhook('blockBan', {
+    embeds: [{
+      title: '🛡️ IP Address Banned',
+      color: 15158332,
+      description: `An IP address has been blocked automatically by Threat Radar.`,
+      fields: [
+        { name: 'IP Address', value: `\`${ip}\``, inline: true },
+        { name: 'Action Type', value: `\`auto-ban\``, inline: true },
+        { name: 'Reason', value: reason || 'No reason provided' }
+      ],
+      timestamp: new Date().toISOString(),
+      footer: { text: 'Sparrowx DDoS Guard' }
+    }]
+  });
+
+  sendDiscordWebhook('attack', {
+    embeds: [{
+      title: '⚠️ Threat Detected & Neutralized',
+      color: 15105570,
+      description: `Suspicious activity detected by Threat Radar.`,
+      fields: [
+        { name: 'Source IP', value: `\`${ip}\``, inline: true },
+        { name: 'Score', value: `\`${metrics.score || 'N/A'}\``, inline: true },
+        { name: 'Reason', value: reason || 'N/A' },
+        { name: 'Metrics', value: `TCP: \`${metrics.tcp || 0}\` | SYN: \`${metrics.syn || 0}\` | UDP: \`${metrics.udp || 0}\`` }
+      ],
+      timestamp: new Date().toISOString(),
+      footer: { text: 'Sparrowx Threat Radar' }
+    }]
+  });
   broadcastToAll({
     type: 'radar_ban',
     ip,
@@ -2742,4 +2851,18 @@ app.use((req, res) => {
 
 server.listen(PORT, () => {
   console.log(`\x1b[32m[ok] ${PRODUCT_NAME} server listening on port ${PORT}\x1b[0m`);
+  
+  sendDiscordWebhook('info', {
+    embeds: [{
+      title: '🚀 Sparrowx Server Started',
+      color: 10181046,
+      description: `The Sparrowx DDoS Guard Control Panel is now online.`,
+      fields: [
+        { name: 'Port', value: `\`${PORT}\``, inline: true },
+        { name: 'Product', value: `\`${PRODUCT_NAME}\``, inline: true }
+      ],
+      timestamp: new Date().toISOString(),
+      footer: { text: 'Sparrowx System Info' }
+    }]
+  });
 });
