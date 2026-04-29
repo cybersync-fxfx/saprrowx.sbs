@@ -48,6 +48,8 @@ const wss = new WebSocket.Server({ server });
 const FRONTEND_DIST_DIR = path.join(__dirname, 'frontend', 'dist');
 const FRONTEND_INDEX_PATH = path.join(FRONTEND_DIST_DIR, 'index.html');
 
+const lastAttackAlertSentAt = {};
+
 const DISCORD_WEBHOOKS = {
   blockBan: 'https://discord.com/api/webhooks/1499017546836476015/jmRXGwbDjn29v-jexmhIB2EoASy2DKztnsDDcjPh2As4fUYp6beZvT4vPXi6CvyoOmnc',
   attack: 'https://discord.com/api/webhooks/1499017771911217304/vgAvLNMV9UoFpWy95t0d8HQDwDe7HlwUswtFVKXVECV0aF6lCu1Rx6pYGK7aKLJGSWi8',
@@ -1828,6 +1830,38 @@ app.post('/api/agent/stats', agentAuthMiddleware, (req, res) => {
     stats.bannedIPs = guardBlocklist.count || 0;
     stats.sbsBanTotal = Number(db.sbsBanTotal || 0);
   }
+
+  // Attack Detection Heuristic for Discord Alerts
+  const synRate = stats?.synRate ?? 0;
+  const pps = stats?.pps ?? 0;
+  const inMbps = stats?.inMbps ?? 0;
+  const agent = db.agents[agentId] || {};
+  
+  if (synRate > 50 || pps > 5000 || inMbps > 20) {
+    const now = Date.now();
+    const lastSent = lastAttackAlertSentAt[agentId] || 0;
+    
+    if (now - lastSent > 60000) { // 1 minute cooldown
+      lastAttackAlertSentAt[agentId] = now;
+      
+      sendDiscordWebhook('attack', {
+        embeds: [{
+          title: '🚨 Client Infrastructure Under Attack!',
+          color: 16515840,
+          description: `High volume traffic detected on Agent \`${agentId}\`.`,
+          fields: [
+            { name: 'Agent ID', value: `\`${agentId}\``, inline: true },
+            { name: 'Hostname', value: `\`${agent.hostname || 'unknown'}\``, inline: true },
+            { name: 'Packet Rate', value: `\`${pps} pps\``, inline: true },
+            { name: 'SYN Rate', value: `\`${synRate} req/s\``, inline: true },
+            { name: 'Bandwidth', value: `\`${inMbps} Mbps\``, inline: true }
+          ],
+          timestamp: new Date().toISOString(),
+          footer: { text: 'Sparrowx Attack Monitor' }
+        }]
+      });
+    }
+  }
   queueAgentSelfUpdateIfNeeded(agentId, stats?.agentBuild, req.user.id);
   const tunnelName = stats?.tunnelName || getTunnelInterfaceName(agentId);
   const tunnelPresent = Boolean(stats?.tunnelPresent);
@@ -2364,22 +2398,6 @@ async function applyRadarAutoBan(ip, reason, metrics = {}) {
       ],
       timestamp: new Date().toISOString(),
       footer: { text: 'Sparrowx DDoS Guard' }
-    }]
-  });
-
-  sendDiscordWebhook('attack', {
-    embeds: [{
-      title: '⚠️ Threat Detected & Neutralized',
-      color: 15105570,
-      description: `Suspicious activity detected by Threat Radar.`,
-      fields: [
-        { name: 'Source IP', value: `\`${ip}\``, inline: true },
-        { name: 'Score', value: `\`${metrics.score || 'N/A'}\``, inline: true },
-        { name: 'Reason', value: reason || 'N/A' },
-        { name: 'Metrics', value: `TCP: \`${metrics.tcp || 0}\` | SYN: \`${metrics.syn || 0}\` | UDP: \`${metrics.udp || 0}\`` }
-      ],
-      timestamp: new Date().toISOString(),
-      footer: { text: 'Sparrowx Threat Radar' }
     }]
   });
   broadcastToAll({
