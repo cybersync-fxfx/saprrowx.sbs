@@ -1145,6 +1145,25 @@ app.get('/api/agent/download', authMiddleware, (req, res) => {
   } catch (_) {
     serverUrl = fallbackServerUrl;
   }
+
+  const agentId = req.user.agent_id;
+  let tunnelConfig = getTunnelConfig(agentId);
+  if (!tunnelConfig) {
+    const guardKeys = generateWgKeys();
+    const clientKeys = generateWgKeys();
+    tunnelConfig = getOrAllocateTunnelConfig(agentId, {
+      userId: req.user.id,
+      clientPublicIp: 'auto',
+      guardPublicIp: resolveGuardPublicIp(req),
+      guardPrivateKey: guardKeys.priv,
+      guardPublicKey: guardKeys.pub,
+      clientPrivateKey: clientKeys.priv,
+      clientPublicKey: clientKeys.pub,
+      listenPort: 51820 + (getTunnelConfig(agentId)?.subnetIndex || 0),
+    });
+  }
+
+  const protectedCidrs = String(envCompat('SPARROWX_PROTECTED_CIDRS', 'SBS_PROTECTED_CIDRS', '')).trim();
   
   let osCheckScript = `OS_VERSION=$(grep -oP '(?<=^VERSION_ID=").*(?=")' /etc/os-release)
 if [[ "$osType" == "ubuntu" ]]; then
@@ -1775,6 +1794,27 @@ SBS_AGENT_ID=${req.user.agent_id}
 SBS_API_KEY=${req.user.api_key}
 SBS_ENABLE_TUNNEL=1
 ENV_EOF
+
+cat << TUNNEL_ENV_EOF > /opt/sbs-agent/tunnel.env
+SPARROWX_TUNNEL_NAME=${tunnelConfig.tunnelName}
+SPARROWX_GUARD_PUBLIC_IP=${tunnelConfig.guardPublicIp}
+SPARROWX_GUARD_TUNNEL_IP=${tunnelConfig.guardTunnelIp}
+SPARROWX_CLIENT_TUNNEL_IP=${tunnelConfig.clientTunnelIp}
+SPARROWX_TUNNEL_CIDR=${tunnelConfig.tunnelCidr || 30}
+SPARROWX_PROTECTED_CIDRS=${protectedCidrs}
+SPARROWX_CLIENT_PRIVATE_KEY=${tunnelConfig.clientPrivateKey}
+SPARROWX_GUARD_PUBLIC_KEY=${tunnelConfig.guardPublicKey}
+SPARROWX_GUARD_PORT=${tunnelConfig.listenPort || 51820}
+SBS_TUNNEL_NAME=${tunnelConfig.tunnelName}
+SBS_GUARD_PUBLIC_IP=${tunnelConfig.guardPublicIp}
+SBS_GUARD_TUNNEL_IP=${tunnelConfig.guardTunnelIp}
+SBS_CLIENT_TUNNEL_IP=${tunnelConfig.clientTunnelIp}
+SBS_TUNNEL_CIDR=${tunnelConfig.tunnelCidr || 30}
+SBS_PROTECTED_CIDRS=${protectedCidrs}
+SBS_CLIENT_PRIVATE_KEY=${tunnelConfig.clientPrivateKey}
+SBS_GUARD_PUBLIC_KEY=${tunnelConfig.guardPublicKey}
+SBS_GUARD_PORT=${tunnelConfig.listenPort || 51820}
+TUNNEL_ENV_EOF
 
 cat << 'TUNNEL_SH_EOF' > /opt/sbs-agent/setup-tunnel-client.sh
 ${CLIENT_TUNNEL_SCRIPT_SOURCE}
