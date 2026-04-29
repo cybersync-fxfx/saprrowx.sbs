@@ -94,7 +94,7 @@ export default function ThreatMap({ token }) {
           <div>
             <p className="eyebrow" style={{ color: '#00d8ff', letterSpacing: '2px', fontSize: '0.75rem', textTransform: 'uppercase' }}>Operational Node View</p>
             <h1 className="page-title" style={{ fontSize: '2rem', margin: '5px 0 0 0', background: 'linear-gradient(to right, #fff, #888)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
-              Threat Radar Matrix
+              Sparrowx EYE radar
             </h1>
           </div>
           <div style={{ display: 'flex', gap: '15px' }}>
