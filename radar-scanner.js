@@ -35,7 +35,7 @@ const DEFAULT_CONFIG = {
   banCooldownMs: Number(envCompat('SPARROWX_RADAR_BAN_COOLDOWN_MS', 'SBS_RADAR_BAN_COOLDOWN_MS', 30 * 60 * 1000)),
   logCooldownMs: Number(envCompat('SPARROWX_RADAR_LOG_COOLDOWN_MS', 'SBS_RADAR_LOG_COOLDOWN_MS', 5 * 60 * 1000)),
   ignoredLocalPorts: parseIntegerList(envCompat('SPARROWX_RADAR_IGNORE_PORTS', 'SBS_RADAR_IGNORE_PORTS', '22,80,443,3001')),
-  whitelistCidrs: normalizeCidrs(envCompat('SPARROWX_RADAR_WHITELIST_CIDRS', 'SBS_RADAR_WHITELIST_CIDRS', '127.0.0.0/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,169.254.0.0/16,35.235.240.0/20')),
+  whitelistCidrs: normalizeCidrs(envCompat('SPARROWX_RADAR_WHITELIST_CIDRS', 'SBS_RADAR_WHITELIST_CIDRS', '127.0.0.0/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,169.254.0.0/16,35.235.240.0/20,173.245.48.0/20,103.21.244.0/22,103.22.200.0/22,103.31.4.0/22,141.101.64.0/18,108.162.192.0/18,190.93.240.0/20,188.114.96.0/20,197.234.240.0/22,198.41.128.0/17,162.158.0.0/15,104.16.0.0/13,104.24.0.0/14,172.64.0.0/13,131.0.72.0/22')),
   trustedProxyCidrs: normalizeCidrs(envCompat('SPARROWX_RADAR_TRUSTED_PROXY_CIDRS', 'SBS_RADAR_TRUSTED_PROXY_CIDRS', '')),
 };
 
@@ -144,6 +144,17 @@ class RadarScanner {
 
     this.configPath = path.join(getTunnelStateDir(), 'radar-config.json');
     this.config = this.loadConfig();
+
+    // Dynamically whitelist Supabase address to prevent accidental core blocking
+    try {
+      const dns = require('dns');
+      const url = new URL(process.env.SUPABASE_URL || 'https://supabase.co');
+      dns.lookup(url.hostname, (err, address) => {
+        if (!err && address && !this.config.whitelistCidrs.includes(`${address}/32`)) {
+          this.config.whitelistCidrs.push(`${address}/32`);
+        }
+      });
+    } catch (_) {}
   }
 
   loadConfig() {
