@@ -2531,6 +2531,57 @@ app.get('/api/internal/agents', (req, res) => {
   res.json(db.agents);
 });
 
+app.get('/api/internal/users', async (req, res) => {
+  const clientIp = req.socket.remoteAddress;
+  if (clientIp !== '127.0.0.1' && clientIp !== '::1' && clientIp !== '::ffff:127.0.0.1') {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  
+  if (!ADMIN_FEATURES_ENABLED) {
+    return res.status(503).json({ error: 'Admin features not enabled' });
+  }
+
+  try {
+    const { data, error } = await supabaseAdmin.from('user_profiles').select('id, username, role, status, agent_id');
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data || []);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/internal/users/status', async (req, res) => {
+  const clientIp = req.socket.remoteAddress;
+  if (clientIp !== '127.0.0.1' && clientIp !== '::1' && clientIp !== '::ffff:127.0.0.1') {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+
+  if (!ADMIN_FEATURES_ENABLED) {
+    return res.status(503).json({ error: 'Admin features not enabled' });
+  }
+
+  const { username, status } = req.body;
+  if (!username || !status) {
+    return res.status(400).json({ error: 'Missing username or status' });
+  }
+
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('user_profiles')
+      .update({ status })
+      .eq('username', username)
+      .select();
+
+    if (error) return res.status(500).json({ error: error.message });
+    if (!data || data.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    res.json({ success: true, user: data[0] });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get('/api/internal/storage-status', (req, res) => {
   const clientIp = req.socket.remoteAddress;
   if (clientIp !== '127.0.0.1' && clientIp !== '::1' && clientIp !== '::ffff:127.0.0.1') {

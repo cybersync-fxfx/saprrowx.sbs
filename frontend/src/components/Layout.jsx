@@ -42,10 +42,6 @@ export default function Layout({ user, setToken }) {
       <header className="topbar">
         <div className="brand-lockup">
           <img src="/logo.png" alt="SBS Logo" className="brand-logo" />
-          <div>
-            <div className="brand-title">SBS</div>
-            <div className="brand-subtitle">Autonomous Infrastructure Security</div>
-          </div>
         </div>
 
         <div className="topbar-meta">
