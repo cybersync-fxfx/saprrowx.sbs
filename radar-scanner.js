@@ -202,6 +202,30 @@ class RadarScanner {
     return { ...this.config };
   }
 
+  getEffectiveConfig() {
+    const base = { ...this.config };
+    if (base.mode === 'strict') {
+      base.threshold = Math.floor(base.threshold * 0.66);
+      base.watchThreshold = Math.floor(base.watchThreshold * 0.5);
+      base.connWarn = Math.floor(base.connWarn * 0.5);
+      base.connBan = Math.floor(base.connBan * 0.5);
+      base.synWarn = Math.floor(base.synWarn * 0.5);
+      base.synBan = Math.floor(base.synBan * 0.5);
+      base.udpWarn = Math.floor(base.udpWarn * 0.5);
+      base.udpBan = Math.floor(base.udpBan * 0.5);
+    } else if (base.mode === 'shield') {
+      base.threshold = Math.floor(base.threshold * 0.33);
+      base.watchThreshold = Math.floor(base.watchThreshold * 0.2);
+      base.connWarn = Math.floor(base.connWarn * 0.2);
+      base.connBan = Math.floor(base.connBan * 0.2);
+      base.synWarn = Math.floor(base.synWarn * 0.2);
+      base.synBan = Math.floor(base.synBan * 0.2);
+      base.udpWarn = Math.floor(base.udpWarn * 0.2);
+      base.udpBan = Math.floor(base.udpBan * 0.2);
+    }
+    return base;
+  }
+
   updateConfig(patch = {}) {
     this.config = this.normalizeConfig({ ...this.config, ...patch });
     this.saveConfig();
@@ -316,6 +340,7 @@ class RadarScanner {
   }
 
   scoreIp(ip, metrics, previous = {}) {
+    const config = this.getEffectiveConfig();
     const reasons = [];
     let score = 0;
     const totalConnections = metrics.tcp + metrics.udp;
@@ -323,55 +348,55 @@ class RadarScanner {
     const synRatio = metrics.syn / Math.max(metrics.tcp, 1);
     const portFanout = metrics.localPorts.size;
 
-    if (metrics.tcp >= this.config.connBan) {
+    if (metrics.tcp >= config.connBan) {
       score += 32;
       reasons.push(`${metrics.tcp} tcp connections`);
-    } else if (metrics.tcp >= this.config.connWarn) {
+    } else if (metrics.tcp >= config.connWarn) {
       score += 16;
       reasons.push(`${metrics.tcp} tcp connections`);
     }
 
-    if (metrics.syn >= this.config.synBan) {
+    if (metrics.syn >= config.synBan) {
       score += 36;
       reasons.push(`${metrics.syn} SYN-RECV sockets`);
-    } else if (metrics.syn >= this.config.synWarn) {
+    } else if (metrics.syn >= config.synWarn) {
       score += 18;
       reasons.push(`${metrics.syn} SYN-RECV sockets`);
     }
 
-    if (metrics.udp >= this.config.udpBan) {
+    if (metrics.udp >= config.udpBan) {
       score += 30;
       reasons.push(`${metrics.udp} udp sockets`);
-    } else if (metrics.udp >= this.config.udpWarn) {
+    } else if (metrics.udp >= config.udpWarn) {
       score += 15;
       reasons.push(`${metrics.udp} udp sockets`);
     }
 
-    if (synRatio >= this.config.synRatioBan && metrics.syn >= this.config.synWarn) {
+    if (synRatio >= config.synRatioBan && metrics.syn >= config.synWarn) {
       score += 22;
       reasons.push(`SYN ratio ${synRatio.toFixed(2)}`);
-    } else if (synRatio >= this.config.synRatioWarn && metrics.syn >= Math.max(10, Math.floor(this.config.synWarn / 2))) {
+    } else if (synRatio >= config.synRatioWarn && metrics.syn >= Math.max(10, Math.floor(config.synWarn / 2))) {
       score += 10;
       reasons.push(`SYN ratio ${synRatio.toFixed(2)}`);
     }
 
-    if (delta >= this.config.burstBan) {
+    if (delta >= config.burstBan) {
       score += 24;
       reasons.push(`burst +${delta}`);
-    } else if (delta >= this.config.burstWarn) {
+    } else if (delta >= config.burstWarn) {
       score += 12;
       reasons.push(`burst +${delta}`);
     }
 
-    if (portFanout >= this.config.portFanoutBan) {
+    if (portFanout >= config.portFanoutBan) {
       score += 20;
       reasons.push(`${portFanout} destination ports`);
-    } else if (portFanout >= this.config.portFanoutWarn) {
+    } else if (portFanout >= config.portFanoutWarn) {
       score += 8;
       reasons.push(`${portFanout} destination ports`);
     }
 
-    if (metrics.established === 0 && (metrics.syn >= this.config.synWarn || metrics.tcp >= this.config.connWarn)) {
+    if (metrics.established === 0 && (metrics.syn >= config.synWarn || metrics.tcp >= config.connWarn)) {
       score += 12;
       reasons.push('no established sessions');
     }
@@ -379,7 +404,7 @@ class RadarScanner {
     if (previous.lastAction === 'banned') {
       score += 18;
       reasons.push('repeat offender');
-    } else if (Number(previous.lastScore || 0) >= this.config.watchThreshold) {
+    } else if (Number(previous.lastScore || 0) >= config.watchThreshold) {
       score += 8;
       reasons.push('prior suspicious activity');
     }
@@ -388,7 +413,8 @@ class RadarScanner {
   }
 
   async scan(options = {}) {
-    if (!this.config.enabled && !options.manual) return this.getStatus();
+    const config = this.getEffectiveConfig();
+    if (!config.enabled && !options.manual) return this.getStatus();
     if (this.isScanning) return this.getStatus();
 
     this.isScanning = true;
@@ -417,15 +443,15 @@ class RadarScanner {
         const previous = this.observations.get(ip) || {};
         const result = this.scoreIp(ip, metrics, previous);
         const nowIso = new Date().toISOString();
-        let action = result.score >= this.config.watchThreshold ? 'watched' : 'clean';
+        let action = result.score >= config.watchThreshold ? 'watched' : 'clean';
 
         if (blockedIps.has(ip)) {
           action = 'banned';
           bannedIps += 1;
-        } else if (this.config.autoBan && result.score >= this.config.threshold) {
+        } else if (config.autoBan && result.score >= config.threshold) {
           const canBanAgain =
             !previous.lastBannedAt ||
-            (Date.now() - Date.parse(previous.lastBannedAt)) >= this.config.banCooldownMs;
+            (Date.now() - Date.parse(previous.lastBannedAt)) >= config.banCooldownMs;
 
           if (canBanAgain) {
             const reason = result.reasons.join(', ') || 'strict radar threshold reached';
@@ -445,8 +471,8 @@ class RadarScanner {
 
         const shouldLog =
           action === 'banned' ||
-          result.score >= this.config.watchThreshold ||
-          (Date.now() - Number(previous.lastLoggedAt || 0)) >= this.config.logCooldownMs;
+          result.score >= config.watchThreshold ||
+          (Date.now() - Number(previous.lastLoggedAt || 0)) >= config.logCooldownMs;
 
         if (shouldLog && result.score > 0) {
           await this.logThreat(ip, result, action, metrics);

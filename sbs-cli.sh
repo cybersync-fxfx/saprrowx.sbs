@@ -42,11 +42,13 @@ echo ""
 if [ "$1" = "--help" ] || [ "$1" = "-h" ]; then
   echo -e "${WHITE}Available commands:${RESET}"
   echo ""
-  echo -e "  ${GREEN}bash sbs-cli.sh${RESET}              - List connected agents"
-  echo -e "  ${GREEN}bash sbs-cli.sh --blocklist${RESET}  - Show all blocked IPs on the firewall"
-  echo -e "  ${GREEN}bash sbs-cli.sh --ban <ip>${RESET}   - Block an IP address"
-  echo -e "  ${GREEN}bash sbs-cli.sh --unban <ip>${RESET} - Unblock an IP address"
-  echo -e "  ${GREEN}bash sbs-cli.sh --help${RESET}       - Show this help"
+  echo -e "  ${GREEN}bash sbs-cli.sh${RESET}                                 - List connected agents"
+  echo -e "  ${GREEN}bash sbs-cli.sh --blocklist${RESET}                     - Show all blocked IPs on the firewall"
+  echo -e "  ${GREEN}bash sbs-cli.sh --ban <ip>${RESET}                      - Block an IP address"
+  echo -e "  ${GREEN}bash sbs-cli.sh --unban <ip>${RESET}                    - Unblock an IP address"
+  echo -e "  ${GREEN}bash sbs-cli.sh --expose <agent_id> <port> [to_port]${RESET} - Route public traffic to agent"
+  echo -e "  ${GREEN}bash sbs-cli.sh --unexpose <agent_id> <port>${RESET}       - Stop routing public traffic"
+  echo -e "  ${GREEN}bash sbs-cli.sh --help${RESET}                          - Show this help"
   echo ""
   exit 0
 fi
@@ -196,6 +198,106 @@ if [ "$1" = "--unban" ]; then
 
   echo -e "${GREEN}[ok] $IP has been unbanned.${RESET}"
   echo ""
+  exit 0
+fi
+
+# -- expose -----------------------------------------------------
+if [ "$1" = "--expose" ]; then
+  AGENT_ID="$2"
+  PUBLIC_PORT="$3"
+  CLIENT_PORT="${4:-$PUBLIC_PORT}"
+
+  if [ -z "$AGENT_ID" ] || [ -z "$PUBLIC_PORT" ]; then
+    echo -e "${RED}[x] Usage: bash sbs-cli.sh --expose <agent_id> <public_port> [client_port]${RESET}"
+    exit 1
+  fi
+
+  STATE_PATH="/opt/sparrowx/tunnels.json"
+  if [ ! -f "$STATE_PATH" ] && [ -f /opt/detroit-sbs/tunnels.json ]; then
+    STATE_PATH=/opt/detroit-sbs/tunnels.json
+  fi
+  
+  if [ ! -f "$STATE_PATH" ]; then
+    echo -e "${RED}[x] Tunnel state file not found.${RESET}"
+    exit 1
+  fi
+
+  CLIENT_IP=$(node -e "
+  const fs = require('fs');
+  const state = JSON.parse(fs.readFileSync('$STATE_PATH', 'utf8'));
+  const alloc = state.allocations['$AGENT_ID'];
+  if (alloc && alloc.clientTunnelIp) {
+    console.log(alloc.clientTunnelIp);
+  }
+  ")
+
+  if [ -z "$CLIENT_IP" ]; then
+    echo -e "${RED}[x] Agent $AGENT_ID not found or has no active tunnel.${RESET}"
+    exit 1
+  fi
+
+  echo -e "${YELLOW}[->] Exposing port $PUBLIC_PORT to $CLIENT_IP:$CLIENT_PORT...${RESET}"
+  
+  MANAGER_PATH="/opt/sparrowx/tunnel-manager.sh"
+  if [ ! -x "$MANAGER_PATH" ] && [ -x /opt/detroit-sbs/tunnel-manager.sh ]; then
+    MANAGER_PATH=/opt/detroit-sbs/tunnel-manager.sh
+  fi
+  
+  bash "$MANAGER_PATH" expose "$PUBLIC_PORT" "$CLIENT_IP" "$CLIENT_PORT"
+  
+  node -e "
+  const fs = require('fs');
+  const state = JSON.parse(fs.readFileSync('$STATE_PATH', 'utf8'));
+  const alloc = state.allocations['$AGENT_ID'];
+  if (alloc) {
+    if (!alloc.exposedPorts) alloc.exposedPorts = [];
+    alloc.exposedPorts = alloc.exposedPorts.filter(p => p.public !== Number('$PUBLIC_PORT'));
+    alloc.exposedPorts.push({ public: Number('$PUBLIC_PORT'), client: Number('$CLIENT_PORT') });
+    fs.writeFileSync('$STATE_PATH', JSON.stringify(state, null, 2));
+  }
+  "
+
+  echo -e "${GREEN}[ok] Port $PUBLIC_PORT exposed to $AGENT_ID ($CLIENT_IP:$CLIENT_PORT).${RESET}"
+  exit 0
+fi
+
+# -- unexpose ---------------------------------------------------
+if [ "$1" = "--unexpose" ]; then
+  AGENT_ID="$2"
+  PUBLIC_PORT="$3"
+
+  if [ -z "$AGENT_ID" ] || [ -z "$PUBLIC_PORT" ]; then
+    echo -e "${RED}[x] Usage: bash sbs-cli.sh --unexpose <agent_id> <public_port>${RESET}"
+    exit 1
+  fi
+
+  STATE_PATH="/opt/sparrowx/tunnels.json"
+  if [ ! -f "$STATE_PATH" ] && [ -f /opt/detroit-sbs/tunnels.json ]; then
+    STATE_PATH=/opt/detroit-sbs/tunnels.json
+  fi
+
+  echo -e "${YELLOW}[->] Removing port exposure for port $PUBLIC_PORT...${RESET}"
+  
+  MANAGER_PATH="/opt/sparrowx/tunnel-manager.sh"
+  if [ ! -x "$MANAGER_PATH" ] && [ -x /opt/detroit-sbs/tunnel-manager.sh ]; then
+    MANAGER_PATH=/opt/detroit-sbs/tunnel-manager.sh
+  fi
+  
+  bash "$MANAGER_PATH" unexpose "$PUBLIC_PORT"
+  
+  if [ -f "$STATE_PATH" ]; then
+    node -e "
+    const fs = require('fs');
+    const state = JSON.parse(fs.readFileSync('$STATE_PATH', 'utf8'));
+    const alloc = state.allocations['$AGENT_ID'];
+    if (alloc && alloc.exposedPorts) {
+      alloc.exposedPorts = alloc.exposedPorts.filter(p => p.public !== Number('$PUBLIC_PORT'));
+      fs.writeFileSync('$STATE_PATH', JSON.stringify(state, null, 2));
+    }
+    "
+  fi
+
+  echo -e "${GREEN}[ok] Port $PUBLIC_PORT unexposed.${RESET}"
   exit 0
 fi
 

@@ -5,22 +5,17 @@ STATE_PATH="${SPARROWX_TUNNEL_STATE_PATH:-${SBS_TUNNEL_STATE_PATH:-/opt/sparrowx
 if [ ! -f "$STATE_PATH" ] && [ -f /opt/detroit-sbs/tunnels.json ]; then
   STATE_PATH=/opt/detroit-sbs/tunnels.json
 fi
+
 MANAGER_PATH="${SPARROWX_TUNNEL_MANAGER:-${SBS_TUNNEL_MANAGER:-/opt/sparrowx/tunnel-manager.sh}}"
 if [ ! -x "$MANAGER_PATH" ] && [ -x /opt/detroit-sbs/tunnel-manager.sh ]; then
   MANAGER_PATH=/opt/detroit-sbs/tunnel-manager.sh
 fi
 
 if [ ! -f "$STATE_PATH" ]; then
-  echo "[restore-tunnels] No tunnel state file found at $STATE_PATH"
   exit 0
 fi
 
-if [ ! -x "$MANAGER_PATH" ]; then
-  echo "[restore-tunnels] Tunnel manager missing or not executable: $MANAGER_PATH" >&2
-  exit 1
-fi
-
-# Extract and run restoration for each allocation
+# 1. Check and Repair Tunnel Interfaces
 node - "$STATE_PATH" <<'NODE' | while IFS=$'\t' read -r agentId clientPublicIp guardPublicIp guardTunnelIp clientTunnelIp listenPort tunnelName guardPriv clientPub; do
 const fs = require('fs');
 const statePath = process.argv[2];
@@ -37,22 +32,18 @@ NODE
   if [ -z "${agentId:-}" ]; then
     continue
   fi
-  echo "[restore-tunnels] Restoring WireGuard tunnel for ${agentId} (${clientPublicIp})"
   
-  export SPARROWX_GUARD_PRIVATE_KEY="$guardPriv"
-  export SPARROWX_CLIENT_PUBLIC_KEY="$clientPub"
-  export SBS_GUARD_PRIVATE_KEY="$guardPriv"
-  export SBS_CLIENT_PUBLIC_KEY="$clientPub"
-  
-  if [ -z "$guardPriv" ] || [ -z "$clientPub" ]; then
-    echo "[restore-tunnels] Skip ${agentId}: WireGuard keys missing in state file."
-    continue
+  if ! ip link show dev "$tunnelName" >/dev/null 2>&1; then
+    echo "[repair-tunnels] Interface $tunnelName is DOWN. Repairing..."
+    export SPARROWX_GUARD_PRIVATE_KEY="$guardPriv"
+    export SPARROWX_CLIENT_PUBLIC_KEY="$clientPub"
+    export SBS_GUARD_PRIVATE_KEY="$guardPriv"
+    export SBS_CLIENT_PUBLIC_KEY="$clientPub"
+    bash "$MANAGER_PATH" add "$agentId" "$clientPublicIp" "$guardPublicIp" "$guardTunnelIp" "$clientTunnelIp" "$listenPort" "$tunnelName"
   fi
-
-  bash "$MANAGER_PATH" add "$agentId" "$clientPublicIp" "$guardPublicIp" "$guardTunnelIp" "$clientTunnelIp" "$listenPort" "$tunnelName"
 done
 
-# Restore Port Forwards
+# 2. Check and Repair Port Forwards
 node - "$STATE_PATH" <<'NODE' | while IFS=$'\t' read -r clientTunnelIp publicPort clientPort; do
 const fs = require('fs');
 const statePath = process.argv[2];
@@ -68,7 +59,9 @@ NODE
   if [ -z "${clientTunnelIp:-}" ]; then
     continue
   fi
-  echo "[restore-tunnels] Restoring Port Forward ${publicPort} -> ${clientTunnelIp}:${clientPort}"
-  bash "$MANAGER_PATH" expose "$publicPort" "$clientTunnelIp" "$clientPort"
+  
+  if ! nft list chain ip detroit_nat port_forwards 2>/dev/null | grep -q "tcp dport ${publicPort} dnat to ${clientTunnelIp}:${clientPort}"; then
+    echo "[repair-tunnels] Port Forward ${publicPort} -> ${clientTunnelIp}:${clientPort} is missing. Repairing..."
+    bash "$MANAGER_PATH" expose "$publicPort" "$clientTunnelIp" "$clientPort"
+  fi
 done
-

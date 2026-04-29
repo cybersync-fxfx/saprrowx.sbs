@@ -373,20 +373,36 @@ If all steps above are done, your side is ready enough for:
 - firewall inspection
 - blocklist actions
 
-## 18. What Still Belongs To Phase 2
+## 18. Phase 2: True Client IP Hiding & Port Forwarding
 
-These are not fully finished yet just by setting up the VPS:
+To fully hide the client server's IP and route public traffic securely through the Guard VPS:
 
-- true client IP hiding
-- full WireGuard routing through guard
-- production tunnel orchestration
-- per-customer public service exposure strategy
+### A. Configure Port Forwarding on Guard VPS
+Use the enhanced `tunnel-manager.sh` to forward public traffic to the client over the tunnel:
 
-That means:
+```bash
+# Usage: bash tunnel-manager.sh expose <public_port> <client_tunnel_ip> [client_port]
+# Example: Forward Guard port 80 to Client internal tunnel IP port 80
+bash /opt/sparrowx/tunnel-manager.sh expose 80 10.200.0.2 80
+```
 
-- your new guard VPS can host the panel now
-- client agents can connect now
-- full DDoS guard routing still needs additional Phase 2 work
+### B. Harden the Client Server Firewall
+On the client server, you must drop direct public traffic to ensure the attacker cannot bypass the guard.
+
+Run these commands on the **Client Server**:
+```bash
+# 1. Allow SSH and WireGuard (management)
+nft add rule inet filter input tcp dport 22 accept
+nft add rule inet filter input udp dport 51820 accept
+
+# 2. ONLY allow HTTP/HTTPS traffic coming from the Guard Tunnel IP
+# Replace 10.200.0.1 with your Guard's internal tunnel IP
+nft add rule inet filter input ip saddr 10.200.0.1 tcp dport { 80, 443 } accept
+
+# 3. Drop all other direct incoming traffic to protected ports
+nft add rule inet filter input tcp dport { 80, 443 } drop
+```
+
 
 ## 19. Quick Re-Deploy Commands
 

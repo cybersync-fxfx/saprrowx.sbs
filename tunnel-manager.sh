@@ -111,12 +111,71 @@ EOF
     echo "{ \"status\": \"ok\", \"tunnel\": \"removed\" }"
     ;;
 
+  expose)
+    PUBLIC_PORT="${2:-}"
+    CLIENT_INTERNAL_IP="${3:-}"
+    CLIENT_PORT="${4:-$PUBLIC_PORT}"
+    
+    if [ -z "$PUBLIC_PORT" ] || [ -z "$CLIENT_INTERNAL_IP" ]; then
+      echo "Usage: $0 expose <public_port> <client_tunnel_ip> [client_port]" >&2
+      exit 1
+    fi
+
+    log "Exposing port ${PUBLIC_PORT} to ${CLIENT_INTERNAL_IP}:${CLIENT_PORT}..."
+    ensure_nft_table
+    
+    # Ensure prerouting chain exists
+    nft list chain ip detroit_nat prerouting >/dev/null 2>&1 || nft add chain ip detroit_nat prerouting '{ type nat hook prerouting priority -100; policy accept; }'
+    
+    # Ensure port_forwards chain exists
+    nft list chain ip detroit_nat port_forwards >/dev/null 2>&1 || nft add chain ip detroit_nat port_forwards
+    
+    # Check if jump rule exists in prerouting
+    if ! nft list chain ip detroit_nat prerouting | grep -q "jump port_forwards"; then
+      nft add rule ip detroit_nat prerouting jump port_forwards
+    fi
+
+    # Check if rule already exists
+    if nft list chain ip detroit_nat port_forwards | grep -q "tcp dport ${PUBLIC_PORT} dnat to ${CLIENT_INTERNAL_IP}:${CLIENT_PORT}"; then
+      log "Port forward rule already exists."
+    else
+      nft add rule ip detroit_nat port_forwards tcp dport ${PUBLIC_PORT} dnat to ${CLIENT_INTERNAL_IP}:${CLIENT_PORT}
+    fi
+
+    echo "{ \"status\": \"ok\", \"action\": \"exposed\", \"public_port\": \"${PUBLIC_PORT}\", \"target\": \"${CLIENT_INTERNAL_IP}:${CLIENT_PORT}\" }"
+    ;;
+
+  unexpose)
+    PUBLIC_PORT="${2:-}"
+    
+    if [ -z "$PUBLIC_PORT" ]; then
+      echo "Usage: $0 unexpose <public_port>" >&2
+      exit 1
+    fi
+
+    log "Removing port forward for port ${PUBLIC_PORT}..."
+    ensure_nft_table
+
+    if nft list chain ip detroit_nat port_forwards >/dev/null 2>&1; then
+      HANDLE=$(nft -a list chain ip detroit_nat port_forwards | grep "tcp dport ${PUBLIC_PORT}" | grep -oP 'handle \K\d+' || true)
+      if [ -n "$HANDLE" ]; then
+        nft delete rule ip detroit_nat port_forwards handle $HANDLE
+        log "Removed rule handle $HANDLE"
+      else
+        log "No rule found for port ${PUBLIC_PORT}"
+      fi
+    fi
+
+    echo "{ \"status\": \"ok\", \"action\": \"unexposed\", \"public_port\": \"${PUBLIC_PORT}\" }"
+    ;;
+
   list)
     wg show
     ;;
 
   *)
-    echo "Usage: $0 <add|remove|list> ..." >&2
+    echo "Usage: $0 <add|remove|expose|unexpose|list> ..." >&2
     exit 1
     ;;
 esac
+
