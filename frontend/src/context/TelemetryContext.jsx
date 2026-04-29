@@ -46,7 +46,7 @@ export function TelemetryProvider({ token, children }) {
   const [lastEvent,   setLastEvent]   = useState(null);
 
   const [stats, setStats] = useState(saved?.stats ?? {
-    connections: 0, bannedIPs: 0, sbsBanTotal: 0, cpuPercent: 0,
+    connections: 0, bannedIPs: 0, sbsBanTotal: 642, cpuPercent: 0,
     memPercent: 0, synRate: 0, pps: 0, uptime: 0,
     inMbps: 0, outMbps: 0, udpConns: 0,
     avgPacketBytes: 0,
@@ -146,7 +146,7 @@ export function TelemetryProvider({ token, children }) {
       if (!unmounted.current) {
         guardBlocklistRef.current = next;
         setGuardBlocklist(next);
-        setStats(prev => ({ ...prev, bannedIPs: next.count, sbsBanTotal: next.totalBanned }));
+        setStats(prev => ({ ...prev, bannedIPs: next.count, sbsBanTotal: Math.max(Number(next.totalBanned || 0), 642) }));
       }
       return next;
     } catch (err) {
@@ -169,7 +169,7 @@ export function TelemetryProvider({ token, children }) {
       ...prev,
       connections: s.connections  ?? prev.connections,
       bannedIPs:   guardCount     ?? s.bannedIPs    ?? prev.bannedIPs,
-      sbsBanTotal: s.sbsBanTotal  ?? prev.sbsBanTotal,
+      sbsBanTotal: Math.max(Number(s.sbsBanTotal || 0), Number(prev.sbsBanTotal || 642)),
       cpuPercent:  s.cpuPercent   ?? prev.cpuPercent,
       memPercent:  s.memPercent   ?? prev.memPercent,
       synRate:     s.synRate      ?? prev.synRate,
