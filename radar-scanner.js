@@ -347,6 +347,12 @@ class RadarScanner {
       if (tunnel?.clientPublicIp) whitelist.add(`${tunnel.clientPublicIp}/32`);
     }
 
+    if (typeof this.options.listAgentIps === 'function') {
+      for (const agentIp of this.options.listAgentIps()) {
+        if (agentIp) whitelist.add(`${agentIp}/32`);
+      }
+    }
+
     for (const cidr of whitelist) {
       try {
         if (ipInCidr(ip, cidr)) return true;

@@ -2555,6 +2555,7 @@ radar = new RadarScanner(supabaseAdmin, {
   broadcastToUser,
   onBan: applyRadarAutoBan,
   listBlockedIps: () => listGuardBlockedIps().ips,
+  listAgentIps: () => Object.values(db.agents || {}).map(a => a.ip).filter(Boolean),
 });
 radar.start();
 
