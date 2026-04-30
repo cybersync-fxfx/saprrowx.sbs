@@ -3,13 +3,16 @@ import { ComposableMap, Geographies, Geography, Marker, Line } from 'react-simpl
 import { useTelemetry } from '../context/TelemetryContext';
 
 const geoUrl = "https://unpkg.com/world-atlas@2.0.2/countries-110m.json";
-const GUARD_COORD = [103.8198, 1.3521]; // Singapore Guard Node (SparrowX)
 
 export default function ThreatMap({ token }) {
-  const { trafficEvents } = useTelemetry();
+  const { trafficEvents, stats } = useTelemetry();
   const [data, setData] = useState({ liveScores: [], stats: { scannedToday: 0, blockedToday: 0 } });
   const [hoveredMarker, setHoveredMarker] = useState(null);
   const [terminalLogs, setTerminalLogs] = useState([]);
+  const [selectedIp, setSelectedIp] = useState(null);
+  const [lookupData, setLookupData] = useState(null);
+  const [lookupLoading, setLookupLoading] = useState(false);
+  const [lookupError, setLookupError] = useState('');
   const logEndRef = useRef(null);
   
   useEffect(() => {
@@ -31,6 +34,22 @@ export default function ThreatMap({ token }) {
     const id = setInterval(fetchStats, 3000);
     return () => clearInterval(id);
   }, [token]);
+
+  const inspectIp = (ip) => {
+    if (!ip || !token) return;
+    setSelectedIp(ip);
+    setLookupLoading(true);
+    setLookupError('');
+
+    fetch(`/api/radar/ip/${encodeURIComponent(ip)}`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : r.json().then(err => Promise.reject(err)))
+      .then(d => setLookupData(d))
+      .catch(err => {
+        setLookupError(err?.error || 'IP lookup failed');
+        setLookupData(null);
+      })
+      .finally(() => setLookupLoading(false));
+  };
 
   // Build a real-time operations terminal feed
   useEffect(() => {
@@ -76,6 +95,23 @@ export default function ThreatMap({ token }) {
     if (action === 'watched' || score >= 55) return '#ffb833'; 
     return '#33ff77'; 
   };
+
+  const formatDate = (value) => {
+    if (!value) return '-';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return String(value);
+    return date.toLocaleString();
+  };
+
+  const compactValue = (value) => {
+    if (value === null || value === undefined || value === '') return '-';
+    return String(value);
+  };
+
+  const lookupColor = lookupData ? getColor(lookupData.action, lookupData.score) : '#00d8ff';
+  const locationParts = lookupData
+    ? [lookupData.geo?.city, lookupData.geo?.region, lookupData.geo?.country].filter(Boolean)
+    : [];
 
   return (
     <div className="page-shell" style={{ maxWidth: '1600px', margin: '0 auto', padding: '20px' }}>
@@ -153,24 +189,25 @@ export default function ThreatMap({ token }) {
               }
             </Geographies>
 
-            {/* Central Guard Operations Node */}
-            <Marker coordinates={GUARD_COORD}>
+            {/* Central Target Node (The User's VPS) */}
+            <Marker coordinates={[data.agentLocation?.lon || 103.8198, data.agentLocation?.lat || 1.3521]}>
               <circle r={25} fill="#00d8ff" opacity={0.08} className="radar-pulse" />
               <circle r={10} fill="#00d8ff" opacity={0.2} />
               <circle r={4} fill="#00d8ff" />
               <text textAnchor="middle" y={-18} style={{ fontFamily: "monospace", fill: "#00d8ff", fontSize: "11px", fontWeight: 'bold', letterSpacing: '2px', textShadow: "0 0 8px rgba(0, 216, 255, 0.8)" }}>
-                SPARROWX GUARD
+                PROTECTED VPS ({data.agentLocation?.city || 'GUARD'})
               </text>
             </Marker>
             
             {markers.map((marker) => {
               const color = getColor(marker.action, marker.score);
+              const destCoord = [data.agentLocation?.lon || 103.8198, data.agentLocation?.lat || 1.3521];
               return (
                 <React.Fragment key={marker.id}>
                   {/* Multilayered Laser Beams (Outer glow, Inner glow, Core beam) */}
                   <Line
                     from={[marker.lon, marker.lat]}
-                    to={GUARD_COORD}
+                    to={destCoord}
                     stroke={color}
                     strokeWidth={4}
                     className="laser-glow-outer"
@@ -178,7 +215,7 @@ export default function ThreatMap({ token }) {
                   />
                   <Line
                     from={[marker.lon, marker.lat]}
-                    to={GUARD_COORD}
+                    to={destCoord}
                     stroke={color}
                     strokeWidth={2}
                     className="laser-glow-inner"
@@ -186,7 +223,7 @@ export default function ThreatMap({ token }) {
                   />
                   <Line
                     from={[marker.lon, marker.lat]}
-                    to={GUARD_COORD}
+                    to={destCoord}
                     stroke={color}
                     strokeWidth={1}
                     strokeLinecap="round"
@@ -199,6 +236,7 @@ export default function ThreatMap({ token }) {
                     coordinates={[marker.lon, marker.lat]}
                     onMouseEnter={() => setHoveredMarker(marker.id)}
                     onMouseLeave={() => setHoveredMarker(null)}
+                    onClick={() => inspectIp(marker.ip)}
                   >
                     <circle r={4} fill={color} style={{ cursor: 'pointer' }} />
                     <circle r={15} fill={color} opacity={0.3} className="ping-anim" style={{ pointerEvents: 'none' }} />
@@ -209,7 +247,7 @@ export default function ThreatMap({ token }) {
                         <rect width="125" height="35" rx="6" fill="rgba(6, 8, 12, 0.95)" stroke={color} strokeWidth="1.5" style={{ filter: 'drop-shadow(0px 4px 8px rgba(0,0,0,0.5))' }} />
                         <text x="8" y="14" style={{ fontFamily: "monospace", fill: "#ffffff", fontSize: "9px", fontWeight: "bold" }}>{marker.ip}</text>
                         <text x="8" y="26" style={{ fontFamily: "monospace", fill: color, fontSize: "7.5px", fontWeight: "bold", letterSpacing: '0.5px' }}>
-                          RISK: {marker.score} | {marker.action.toUpperCase()}
+                          {marker.city ? `${marker.city} ` : ''}RISK: {marker.score}
                         </text>
                       </g>
                     )}
@@ -380,4 +418,3 @@ export default function ThreatMap({ token }) {
     </div>
   );
 }
-

@@ -520,8 +520,12 @@ class RadarScanner {
 
         const geo = geoip.lookup(ip);
         let country = (geo && geo.country) ? geo.country : '';
+        let region = (geo && geo.region) ? geo.region : '';
+        let city = (geo && geo.city) ? geo.city : '';
+        let timezone = (geo && geo.timezone) ? geo.timezone : '';
         let lat = (geo && geo.ll && geo.ll[0] !== null) ? geo.ll[0] : null;
         let lon = (geo && geo.ll && geo.ll[1] !== null) ? geo.ll[1] : null;
+        let geoSource = geo ? 'geoip-lite' : 'fallback';
 
         if (lat === null || lon === null || country === '') {
           const FALLBACKS = [
@@ -536,12 +540,20 @@ class RadarScanner {
           country = fb.c;
           lat = fb.lat + ((ipHash % 100) - 50) * 0.15; // Jitter up to +/- 7.5 degrees
           lon = fb.lon + (((ipHash * 3) % 100) - 50) * 0.15;
+          region = '';
+          city = '';
+          timezone = '';
+          geoSource = 'radar-fallback';
         }
 
         liveScores.push({
           id: `${nowIso}-${ip}`,
           ip,
           country: country || 'Unknown',
+          region,
+          city,
+          timezone,
+          geoSource,
           lat,
           lon,
           score: Math.min(100, result.score),

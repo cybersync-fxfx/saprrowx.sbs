@@ -1,6 +1,8 @@
 const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
+const geoip = require('geoip-lite');
+const dns = require('dns').promises;
 
 // Auto-install dependencies if not present
 if (!fs.existsSync(path.join(__dirname, 'node_modules'))) {
@@ -3009,6 +3011,14 @@ app.get('/api/radar/stats', authMiddleware, async (req, res) => {
         error: guardBlocklist.error,
       },
       radar: radar ? radar.getStatus() : null,
+      agentLocation: (() => {
+        const agent = Object.values(db.agents).find(a => a.userId === req.user.id);
+        if (agent && agent.ip && agent.ip !== 'auto' && agent.ip !== '127.0.0.1') {
+          const geo = geoip.lookup(agent.ip);
+          if (geo && geo.ll) return { lat: geo.ll[0], lon: geo.ll[1], ip: agent.ip, city: geo.city || '', country: geo.country || '' };
+        }
+        return { lat: 1.3521, lon: 103.8198, ip: 'Guard Node', city: 'Singapore', country: 'SG' }; // Fallback
+      })()
     });
   } catch (err) {
     const missingRadarTable = err?.code === '42P01' || /threat_radar/i.test(err?.message || '');
@@ -3020,6 +3030,127 @@ app.get('/api/radar/stats', authMiddleware, async (req, res) => {
       code: err?.code || null
     });
   }
+});
+
+app.get('/api/radar/ip/:ip', authMiddleware, async (req, res) => {
+  let ip;
+  try {
+    ip = assertValidIpv4(normalizeIp(req.params.ip));
+  } catch (err) {
+    return res.status(400).json({ error: err.message || 'Invalid IP address.' });
+  }
+
+  const liveScores = radar ? radar.getLiveScores() : [];
+  const live = liveScores.find((item) => item.ip === ip) || null;
+  const geo = geoip.lookup(ip);
+
+  let localIntel = null;
+  try {
+    const intelPath = path.join(__dirname, 'intel', `${ip}.json`);
+    if (fs.existsSync(intelPath)) {
+      const parsed = JSON.parse(fs.readFileSync(intelPath, 'utf8'));
+      localIntel = {
+        firstSeen: parsed.first_seen || null,
+        lastSeen: parsed.last_seen || null,
+        eventCount: Array.isArray(parsed.events) ? parsed.events.length : 0,
+        recent: Array.isArray(parsed.events) ? parsed.events.slice(0, 10) : [],
+      };
+    }
+  } catch (err) {
+    localIntel = { error: err.message || 'Local intel read failed.' };
+  }
+
+  let database = { recent: [], count: 0, error: null };
+  try {
+    const { data: rows, count, error } = await supabaseAdmin
+      .from('threat_radar')
+      .select('*', { count: 'exact' })
+      .eq('ip', ip)
+      .order('detected_at', { ascending: false })
+      .limit(20);
+
+    if (error) throw error;
+    database = {
+      recent: rows || [],
+      count: count || (rows ? rows.length : 0),
+      error: null,
+    };
+  } catch (err) {
+    database.error = err.message || 'Threat history unavailable.';
+  }
+
+  let guard = { blocked: false, count: 0, table: null, error: null };
+  try {
+    const summary = getGuardBlocklistSummary(0);
+    guard = {
+      blocked: Array.isArray(summary.ips) ? summary.ips.includes(ip) : false,
+      count: summary.count || 0,
+      table: summary.tableLabel || null,
+      error: summary.error || null,
+    };
+  } catch (err) {
+    guard.error = err.message || 'Guard blocklist unavailable.';
+  }
+
+  let reverseDns = [];
+  try {
+    reverseDns = await Promise.race([
+      dns.reverse(ip),
+      new Promise((resolve) => setTimeout(() => resolve([]), 1200)),
+    ]);
+  } catch (err) {
+    reverseDns = [];
+  }
+
+  const latestDbEvent = database.recent[0] || null;
+  const latestLocalEvent = localIntel && Array.isArray(localIntel.recent) ? localIntel.recent[0] : null;
+  const latestEvent = latestDbEvent || latestLocalEvent || null;
+  const action = live?.action || latestEvent?.action || (guard.blocked ? 'banned' : 'clean');
+  const score = Math.min(100, Number(live?.score ?? latestEvent?.score ?? 0) || 0);
+  const reasons = live?.reason
+    ? [live.reason]
+    : (Array.isArray(latestEvent?.reasons) ? latestEvent.reasons : [latestEvent?.reason].filter(Boolean));
+
+  const coordinates = geo?.ll
+    ? { lat: geo.ll[0], lon: geo.ll[1] }
+    : (Number.isFinite(live?.lat) && Number.isFinite(live?.lon) ? { lat: live.lat, lon: live.lon } : null);
+
+  res.json({
+    ip,
+    action,
+    score,
+    riskBand: action === 'banned' || score >= 90 ? 'critical' : (action === 'watched' || score >= 55 ? 'watch' : 'normal'),
+    reasons,
+    geo: {
+      country: geo?.country || live?.country || 'Unknown',
+      region: geo?.region || live?.region || '',
+      city: geo?.city || live?.city || '',
+      timezone: geo?.timezone || live?.timezone || '',
+      coordinates,
+      source: geo ? 'geoip-lite' : (live ? live.geoSource || 'radar' : 'unknown'),
+    },
+    reverseDns,
+    guard,
+    live: live ? {
+      detectedAt: live.detected_at || null,
+      score: live.score,
+      action: live.action,
+      reason: live.reason,
+      tcp: live.tcp || 0,
+      syn: live.syn || 0,
+      established: live.established || 0,
+      udp: live.udp || 0,
+      ports: live.ports || 0,
+      delta: live.delta || 0,
+      synRatio: live.synRatio || 0,
+      totalConnections: live.totalConnections || 0,
+    } : null,
+    history: {
+      local: localIntel,
+      database,
+      lastSeen: live?.detected_at || latestEvent?.detected_at || latestEvent?.timestamp || localIntel?.lastSeen || null,
+    },
+  });
 });
 
 // Security Status Check (Layers 1-4)
