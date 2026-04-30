@@ -22,7 +22,7 @@ const DEFAULT_CONFIG = {
 };
 
 export default function ThreatRadar({ token }) {
-  const { trafficEvents, stats, guardBlocklist } = useTelemetry();
+  const { trafficEvents, stats, guardBlocklist, viewMode } = useTelemetry();
   const [data, setData] = useState({ recent: [], liveScores: [], stats: { scannedToday: 0, blockedToday: 0, guardBlockedIps: 0 }, radar: null });
   const [config, setConfig] = useState(DEFAULT_CONFIG);
   const [loading, setLoading] = useState(true);
@@ -31,7 +31,8 @@ export default function ThreatRadar({ token }) {
   const [modeBusy, setModeBusy] = useState('');
 
   const fetchStats = () => {
-    fetch('/api/radar/stats', { headers: { Authorization: `Bearer ${token}` } })
+    const scope = viewMode === 'global' ? 'global' : 'agent';
+    fetch(`/api/radar/stats?scope=${scope}`, { headers: { Authorization: `Bearer ${token}` } })
       .then(async (r) => {
         const payload = await r.json();
         if (!r.ok) {

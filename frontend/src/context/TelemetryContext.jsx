@@ -384,6 +384,10 @@ export function TelemetryProvider({ token, children }) {
       });
       setGuardLogs(prev => [...lines, ...prev].slice(0, 500));
     }
+
+    if (Array.isArray(s.trafficEvents) && s.trafficEvents.length > 0) {
+      setGuardTrafficEvents(prev => [...s.trafficEvents, ...prev].slice(0, 240));
+    }
   }, []);
 
   const connect = useCallback(() => {

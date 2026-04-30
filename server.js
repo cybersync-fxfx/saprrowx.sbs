@@ -99,8 +99,125 @@ function sendDiscordWebhook(type, payload) {
     console.error(`[discord-webhook] Failed to send to ${type}:`, e.message);
   });
 
+  req.on('timeout', () => {
+    req.destroy();
+  });
+
   req.write(data);
   req.end();
+}
+
+function parseEndpoint(value) {
+  const raw = String(value || '').replace(/,.*/, '').trim();
+  if (!raw || raw === '*:*' || raw === '0.0.0.0:*' || raw === '[::]:*') return null;
+
+  let host = raw;
+  let port = '';
+  if (raw[0] === '[') {
+    const end = raw.lastIndexOf(']:');
+    if (end === -1) return null;
+    host = raw.slice(1, end);
+    port = raw.slice(end + 2);
+  } else {
+    const idx = raw.lastIndexOf(':');
+    if (idx === -1) return null;
+    host = raw.slice(0, idx);
+    port = raw.slice(idx + 1);
+  }
+
+  host = host.replace(/%.*$/, '');
+  if (!host || host === '*' || host === '::' || host === '0.0.0.0') return null;
+  const portNumber = Number(port);
+  return {
+    ip: host,
+    port: Number.isFinite(portNumber) ? portNumber : null
+  };
+}
+
+function isServicePort(port) {
+  return [20, 21, 22, 25, 53, 80, 110, 143, 443, 465, 587, 993, 995, 3000, 3001, 51820].includes(Number(port));
+}
+
+function classifyDirection(local, remote) {
+  if (!local || !remote) return 'listen';
+  if (isServicePort(local.port) && !isServicePort(remote.port)) return 'incoming';
+  if (!isServicePort(local.port) && isServicePort(remote.port)) return 'outgoing';
+  if (Number(local.port) < 1024 && Number(remote.port) >= 1024) return 'incoming';
+  if (Number(remote.port) < 1024 && Number(local.port) >= 1024) return 'outgoing';
+  return 'incoming';
+}
+
+function classifyTrafficSeverity(event) {
+  const riskyPorts = [23, 135, 139, 445, 1433, 3306, 3389, 5432, 5900, 6379, 9200, 11211];
+  if (/SYN-RECV/i.test(event.state) || (event.direction === 'incoming' && riskyPorts.includes(Number(event.localPort)))) {
+    return { severity: 'danger', reason: 'suspicious inbound service probe' };
+  }
+  if (event.sizeBytes >= 65536 || /CLOSE-WAIT|LAST-ACK/i.test(event.state)) {
+    return { severity: 'warning', reason: 'large queued packet data' };
+  }
+  if (event.direction === 'incoming' && !isServicePort(event.localPort)) {
+    return { severity: 'warning', reason: 'inbound non-standard port' };
+  }
+  return { severity: 'success', reason: 'normal flow' };
+}
+
+function interfaceSeverity(direction, mbps, packets) {
+  if (mbps >= 50 || packets >= 5000) {
+    return { severity: 'danger', reason: direction + ' flood-rate traffic' };
+  }
+  if (mbps >= 10 || packets >= 1000) {
+    return { severity: 'warning', reason: direction + ' elevated traffic' };
+  }
+  if (packets > 0) {
+    return { severity: 'success', reason: direction + ' normal traffic' };
+  }
+  return { severity: 'success', reason: direction + ' idle' };
+}
+
+function buildInterfaceTrafficEvents(netNow, rxDiff, txDiff, rxPacketDiff, txPacketDiff, inMbps, outMbps, avgPacketBytes) {
+  const now = new Date().toISOString();
+  const iface = netNow.iface || 'unknown';
+  const incoming = {
+    timestamp: now,
+    direction: 'incoming',
+    protocol: 'IFACE',
+    sourceLabel: 'network',
+    destinationLabel: iface,
+    localIp: iface,
+    localPort: null,
+    remoteIp: 'network',
+    remotePort: null,
+    state: rxPacketDiff > 0 ? 'RX' : 'IDLE',
+    recvQ: 0,
+    sendQ: 0,
+    packets: rxPacketDiff,
+    sizeBytes: rxDiff,
+    avgPacketBytes,
+    rateMbps: inMbps,
+    iface,
+    ...interfaceSeverity('incoming', inMbps, rxPacketDiff)
+  };
+  const outgoing = {
+    timestamp: now,
+    direction: 'outgoing',
+    protocol: 'IFACE',
+    sourceLabel: iface,
+    destinationLabel: 'network',
+    localIp: iface,
+    localPort: null,
+    remoteIp: 'network',
+    remotePort: null,
+    state: txPacketDiff > 0 ? 'TX' : 'IDLE',
+    recvQ: 0,
+    sendQ: 0,
+    packets: txPacketDiff,
+    sizeBytes: txDiff,
+    avgPacketBytes,
+    rateMbps: outMbps,
+    iface,
+    ...interfaceSeverity('outgoing', outMbps, txPacketDiff)
+  };
+  return [incoming, outgoing];
 }
 
 const PORT = process.env.PORT || 3001;
@@ -223,6 +340,41 @@ function getGuardCpuUsage() {
   }
 }
 
+function collectGuardTrafficEvents(iface) {
+  try {
+    const output = execSync('ss -Htuna 2>/dev/null | head -n 80').toString();
+    const now = new Date().toISOString();
+    return output.split('\n').filter(l => l.trim()).map((line, index) => {
+      const parts = line.trim().split(/\s+/);
+      if (parts.length < 5) return null;
+      const state = parts[0];
+      const local = parseEndpoint(parts[3]);
+      const remote = parseEndpoint(parts[4]);
+      if (!local || !remote) return null;
+      const direction = classifyDirection(local, remote);
+      const event = {
+        id: [local.ip, local.port, remote.ip, remote.port, index].join(':'),
+        timestamp: now,
+        direction,
+        protocol: parts[0]?.includes('tcp') ? 'TCP' : 'UDP',
+        localIp: local.ip,
+        localPort: local.port,
+        remoteIp: remote.ip,
+        remotePort: remote.port,
+        state,
+        recvQ: 0,
+        sendQ: 0,
+        packets: null,
+        sizeBytes: 0,
+        avgPacketBytes: 0,
+        rateMbps: 0,
+        iface: iface || '-'
+      };
+      return { ...event, ...classifyTrafficSeverity(event) };
+    }).filter(Boolean);
+  } catch (_) { return []; }
+}
+
 function broadcastGuardStats() {
   const netNow = readGuardNetBytes();
   const elapsed = (Date.now() - lastGuardNetSample.ts) / 1000 || 1;
@@ -255,6 +407,11 @@ function broadcastGuardStats() {
     log = logData.split('\n').filter(l => l.trim()).map(l => '[GUARD] ' + l.trim()).join('\n');
   } catch (_) {}
 
+  const trafficEvents = [
+    ...buildInterfaceTrafficEvents(netNow, rxDiff, txDiff, rxPacketDiff, txPacketDiff, inMbps, outMbps, avgPacketBytes),
+    ...collectGuardTrafficEvents(netNow.iface)
+  ];
+
   const stats = {
     connections: Number(db.sbsBanTotal || 0) > 0 ? Math.floor(Math.random() * 5) + 35 : 0, // Mock for now or ss -ant
     established: 0,
@@ -283,6 +440,7 @@ function broadcastGuardStats() {
     telemetryAgentBuild: 'netdev-v2',
     agentBuild: 'guard-v1',
     log,
+    trafficEvents,
   };
 
   // Broadcast ONLY to admins

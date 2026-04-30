@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { ComposableMap, Geographies, Geography, Marker, Line } from 'react-simple-maps';
+import { useTelemetry } from '../context/TelemetryContext';
 
 const geoUrl = "https://unpkg.com/world-atlas@2.0.2/countries-110m.json";
 
 export default function ThreatMap({ token }) {
+  const { viewMode } = useTelemetry();
   const [data, setData] = useState({ liveScores: [], stats: { scannedToday: 0, blockedToday: 0 } });
   const [hoveredMarker, setHoveredMarker] = useState(null);
   const [terminalLogs, setTerminalLogs] = useState([]);
@@ -17,7 +19,8 @@ export default function ThreatMap({ token }) {
   useEffect(() => {
     if (!token) return;
     const fetchStats = () => {
-      fetch('/api/radar/stats', { headers: { Authorization: `Bearer ${token}` } })
+      const scope = viewMode === 'global' ? 'global' : 'agent';
+      fetch(`/api/radar/stats?scope=${scope}`, { headers: { Authorization: `Bearer ${token}` } })
         .then(r => r.ok ? r.json() : null)
         .then(d => {
           if (d) {
