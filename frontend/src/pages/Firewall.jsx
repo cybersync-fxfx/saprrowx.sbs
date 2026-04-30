@@ -25,7 +25,7 @@ const inspectionActions = [
 ];
 
 export default function Firewall({ token, user }) {
-  const { sendCommand, isConnected, commandReady, wsState } = useTelemetry();
+  const { sendCommand, isConnected, commandReady, wsState, viewMode } = useTelemetry();
   const [activeCommand, setActiveCommand] = useState('');
   const [output, setOutput] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
@@ -34,7 +34,7 @@ export default function Firewall({ token, user }) {
   const runInspection = async (action) => {
     if (action.command.includes('systemctl restart nftables')) {
       const approved = window.confirm(
-        'This will restart nftables on the remote server. Continue?'
+        `This will restart nftables on the ${viewMode === 'global' ? 'Guard Infrastructure' : 'remote server'}. Continue?`
       );
       if (!approved) return;
     }
@@ -43,8 +43,24 @@ export default function Firewall({ token, user }) {
     setIsBusy(true);
 
     try {
-      const result = await sendCommand(action.command);
-      setOutput(result.output || '(no output returned)');
+      if (viewMode === 'global') {
+        // Run on guard server via a new internal API or reuse sendCommand if backend supports it
+        // Actually, let's implement /api/guard/command for admins
+        const res = await fetch('/api/guard/command', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ command: action.command })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Failed to execute guard command.');
+        setOutput(data.output || '(no output returned)');
+      } else {
+        const result = await sendCommand(action.command);
+        setOutput(result.output || '(no output returned)');
+      }
     } catch (error) {
       setErrorMessage(error.message);
       setOutput('');

@@ -45,7 +45,7 @@ export default function Landing() {
             <ExternalLink size={20} className="link-icon" />
           </div>
 
-          <a href="#" className="redirect-card">
+          <div onClick={() => navigate('/dashboard')} className="redirect-card pointer" style={{ cursor: 'pointer' }}>
             <div className="card-icon-wrapper">
               <Activity size={24} />
             </div>
@@ -54,7 +54,7 @@ export default function Landing() {
               <p>View real-time network telemetry</p>
             </div>
             <ExternalLink size={20} className="link-icon" />
-          </a>
+          </div>
         </div>
       </main>
     </div>

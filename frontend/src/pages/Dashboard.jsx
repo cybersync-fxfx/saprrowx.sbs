@@ -252,16 +252,22 @@ export default function Dashboard({ token }) {
     { label: 'In (Mbps)',  value: stats.inMbps.toFixed(3) },
     { label: 'Out (Mbps)', value: stats.outMbps.toFixed(3) },
     { label: 'SYN Rate',   value: stats.synRate },
-    { label: 'Tunnel',     value: getTunnelDisplay() },
-    { label: 'Guard Host', value: window.location.hostname },
-    { label: 'Telemetry',  value: telemetryLabel },
-    { label: 'WebSocket',  value: wsLabel },
-    { label: 'Guard Tunnel', value: tunnelMeta ? (tunnelMeta.guardInterfacePresent ? 'present' : 'missing') : 'unknown' },
-    { label: 'Client Tunnel', value: tunnelMeta ? (tunnelMeta.clientTunnelPresent ? 'present' : 'missing') : 'unknown' },
-    { label: 'Tunnel Sync', value: tunnelMeta?.syncMismatch ? 'mismatch' : 'OK' },
-    { label: 'Tunnel Detail', value: tunnelMeta?.detail || 'Waiting for tunnel status...' },
-    { label: 'Tunnel Job', value: tunnelJobLabel },
-    { label: 'Tunnel Job Detail', value: tunnelJobOutput },
+    ...(viewMode !== 'global' ? [
+      { label: 'Tunnel',     value: getTunnelDisplay() },
+      { label: 'Guard Host', value: window.location.hostname },
+      { label: 'Telemetry',  value: telemetryLabel },
+      { label: 'WebSocket',  value: wsLabel },
+      { label: 'Guard Tunnel', value: tunnelMeta ? (tunnelMeta.guardInterfacePresent ? 'present' : 'missing') : 'unknown' },
+      { label: 'Client Tunnel', value: tunnelMeta ? (tunnelMeta.clientTunnelPresent ? 'present' : 'missing') : 'unknown' },
+      { label: 'Tunnel Sync', value: tunnelMeta?.syncMismatch ? 'mismatch' : 'OK' },
+      { label: 'Tunnel Detail', value: tunnelMeta?.detail || 'Waiting for tunnel status...' },
+      { label: 'Tunnel Job', value: tunnelJobLabel },
+      { label: 'Tunnel Job Detail', value: tunnelJobOutput },
+    ] : [
+      { label: 'Guard Node', value: 'Primary Scrubbing Node' },
+      { label: 'DDoS Policy', value: 'XDP_DROP_MALFORMED' },
+      { label: 'Radar Sync', value: 'Active' },
+    ]),
   ];
 
   // ── IP/Port chip parser ───────────────────────────────────────────────────

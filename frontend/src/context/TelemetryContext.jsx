@@ -599,7 +599,7 @@ export function TelemetryProvider({ token, children }) {
     viewMode,
     setViewMode,
     isConnected: viewMode === 'global' ? true : agentStatus === 'CONNECTED',
-    commandReady: viewMode === 'global' ? false : (agentStatus === 'CONNECTED' && wsState === 'open'),
+    commandReady: viewMode === 'global' ? true : (agentStatus === 'CONNECTED' && wsState === 'open'),
   };
 
   return (

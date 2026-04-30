@@ -16,7 +16,7 @@ const dangerousCommandPattern = /\b(rm\s+-rf|mkfs|dd\s+if=|shutdown|reboot|power
 const needsConfirmation = (cmd) => dangerousCommandPattern.test(String(cmd || '').trim());
 
 export default function Terminal({ token, user }) {
-  const { sendCommand, isConnected, commandReady, wsState } = useTelemetry();
+  const { sendCommand, isConnected, commandReady, wsState, viewMode } = useTelemetry();
 
   const [logs, setLogs] = useState([
     { text: '[ SPARROWX SECURE TERMINAL ]', level: 'info' },
@@ -36,20 +36,37 @@ export default function Terminal({ token, user }) {
     if (!cmd.trim()) return;
     if (needsConfirmation(cmd)) {
       const approved = window.confirm(
-        `This command looks potentially destructive:\n\n${cmd}\n\nRun it on the remote server?`
+        `This command looks potentially destructive:\n\n${cmd}\n\nRun it on the ${viewMode === 'global' ? 'Guard Infrastructure' : 'remote server'}?`
       );
       if (!approved) return;
     }
-    setLogs(prev => [...prev, { text: `root@server:~$ ${cmd}`, level: 'info' }]);
+    setLogs(prev => [...prev, { text: `root@${viewMode === 'global' ? 'guard' : 'server'}:~$ ${cmd}`, level: 'info' }]);
     setHistory(prev => [cmd, ...prev].slice(0, 50));
     setHistIdx(-1);
     setIsRunning(true);
     try {
-      const result = await sendCommand(cmd.trim());
-      setLogs(prev => [...prev, {
-        text: result.output || '(no output)',
-        level: result.exitCode === 0 ? 'default' : 'error'
-      }]);
+      if (viewMode === 'global') {
+        const res = await fetch('/api/guard/command', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ command: cmd.trim() })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Failed to execute guard command.');
+        setLogs(prev => [...prev, {
+          text: data.output || '(no output)',
+          level: 'default'
+        }]);
+      } else {
+        const result = await sendCommand(cmd.trim());
+        setLogs(prev => [...prev, {
+          text: result.output || '(no output)',
+          level: result.exitCode === 0 ? 'default' : 'error'
+        }]);
+      }
     } catch (error) {
       setLogs(prev => [...prev, { text: `[error] ${error.message}`, level: 'error' }]);
     } finally {

@@ -86,10 +86,17 @@ export default function Layout({ user, setToken }) {
           <div className="sidebar-card">
             <div className="sidebar-card-header">
               <ServerCog size={16} />
-              <span>{user?.role === 'admin' ? 'Guard Infrastructure' : 'Linked Agent'}</span>
+              <span>{viewMode === 'global' ? 'Guard Infrastructure' : 'Linked Agent'}</span>
             </div>
-            <div className="sidebar-card-value">{user?.role === 'admin' ? 'Global Node' : (user?.agentId || 'Not assigned')}</div>
-            <div className="sidebar-card-meta">{user?.role === 'admin' ? 'Monitoring all traffic scrubbing nodes.' : (isConnected ? 'Agent is streaming telemetry live.' : 'Download a fresh installer to attach a server.')}</div>
+            <div className="sidebar-card-value">
+              {viewMode === 'global' ? 'Primary Guard Node' : (user?.agentId || 'Not assigned')}
+            </div>
+            <div className="sidebar-card-meta">
+              {viewMode === 'global' 
+                ? 'Monitoring all traffic scrubbing nodes.' 
+                : (isConnected ? 'Agent is streaming telemetry live.' : 'Download a fresh installer to attach a server.')
+              }
+            </div>
           </div>
 
           <nav className="sidebar-nav">
@@ -114,7 +121,9 @@ export default function Layout({ user, setToken }) {
                   <div className="nav-link-icon">{item.icon}</div>
                   <div>
                     <div className="nav-link-title">{item.name}</div>
-                    <div className="nav-link-caption">{item.caption}</div>
+                    <div className="nav-link-caption">
+                      {viewMode === 'global' ? item.caption.replace(/your server|the agent/gi, 'global infrastructure') : item.caption}
+                    </div>
                   </div>
                 </NavLink>
               );
