@@ -3022,6 +3022,117 @@ app.get('/api/radar/stats', authMiddleware, async (req, res) => {
   }
 });
 
+// Security Status Check (Layers 1-4)
+app.get('/api/internal/security-status', authMiddleware, async (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: 'Unauthorized' });
+
+  const { execSync } = require('child_process');
+  const status = {
+    xdp: { active: false, details: null },
+    nftables: { active: false, details: null },
+    haproxy: { active: false, details: null },
+    fastnetmon: { active: false, details: null },
+    timestamp: new Date().toISOString()
+  };
+
+  try {
+    // 1. Check XDP
+    try {
+      const xdpCheck = execSync('ip link show | grep xdp', { encoding: 'utf8' });
+      status.xdp.active = xdpCheck.length > 0;
+      status.xdp.details = xdpCheck.trim();
+    } catch (e) { status.xdp.details = 'Not found or not supported'; }
+
+    // 2. Check nftables
+    try {
+      const nftCheck = execSync('nft list ruleset | grep sparrowx_shield', { encoding: 'utf8' });
+      status.nftables.active = nftCheck.length > 0;
+      status.nftables.details = status.nftables.active ? 'SparrowX ruleset detected' : 'Table missing';
+    } catch (e) { status.nftables.details = 'nftables not running or table missing'; }
+
+    // 3. Check HAProxy
+    try {
+      const haCheck = execSync('systemctl is-active haproxy', { encoding: 'utf8' });
+      status.haproxy.active = haCheck.trim() === 'active';
+      status.haproxy.details = haCheck.trim();
+    } catch (e) { status.haproxy.details = 'Service not installed'; }
+
+    // 4. Check FastNetMon
+    try {
+      const fnmCheck = execSync('systemctl is-active fastnetmon', { encoding: 'utf8' });
+      status.fastnetmon.active = fnmCheck.trim() === 'active';
+      status.fastnetmon.details = fnmCheck.trim();
+    } catch (e) { status.fastnetmon.details = 'Service not installed'; }
+
+    res.json(status);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to poll security status', message: err.message });
+  }
+});
+
+// Auto-Fix Security Stack
+app.post('/api/internal/security-fix', authMiddleware, async (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: 'Unauthorized' });
+
+  const { spawn } = require('child_process');
+
+  try {
+    // Run sparrow audit in the background
+    const child = spawn('bash', [path.join(__dirname, 'sparrow.sh'), 'audit'], {
+      detached: true,
+      stdio: 'ignore'
+    });
+    child.unref();
+
+    res.json({ 
+      success: true, 
+      message: 'Security audit and auto-fix started in the background.'
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to trigger auto-fix', message: err.message });
+  }
+});
+
+// Brain Insight (AI Memory)
+app.get('/api/internal/brain-insight', authMiddleware, async (req, res) => {
+  const brainMemoryPath = path.join(__dirname, 'intel', 'brain', 'memory.json');
+  const taughtPath = path.join(__dirname, 'intel', 'brain', 'taught-knowledge.json');
+
+  try {
+    let memory = {};
+    let taught = {};
+
+    if (fs.existsSync(brainMemoryPath)) {
+      memory = JSON.parse(fs.readFileSync(brainMemoryPath, 'utf8'));
+    }
+    if (fs.existsSync(taughtPath)) {
+      taught = JSON.parse(fs.readFileSync(taughtPath, 'utf8'));
+    }
+
+    res.json({
+      memory: {
+        totalEvents: memory.totalEventsProcessed || 0,
+        knownAttackersCount: Object.keys(memory.knownAttackers || {}).length,
+        topAttackers: Object.entries(memory.knownAttackers || {})
+          .sort((a, b) => b[1].hitCount - a[1].hitCount)
+          .slice(0, 5)
+          .map(([ip, data]) => ({ ip, ...data })),
+        patterns: memory.attackPatterns || {},
+        peakHours: memory.hourlyActivity || {},
+        learnedThresholds: memory.learnedThresholds || null,
+        lastAnalyzed: memory.lastAnalyzedAt || null
+      },
+      taught: {
+        trustedCount: (taught.trustedIps || []).length,
+        suspiciousCount: (taught.suspiciousIps || []).length,
+        notesCount: (taught.notes || []).length
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to read brain memory', message: err.message });
+  }
+});
+
 // Catch all for SPA
 app.use((req, res) => {
   if (!fs.existsSync(FRONTEND_INDEX_PATH)) {

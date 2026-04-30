@@ -14,6 +14,7 @@ import ApiKeys   from './pages/ApiKeys';
 import Settings  from './pages/Settings';
 import ThreatRadar from './pages/ThreatRadar';
 import ThreatMap   from './pages/ThreatMap';
+import Security    from './pages/Security';
 
 function App() {
   const [token,   setToken]   = useState(localStorage.getItem('sparrowx_token') || localStorage.getItem('sbs_token'));
@@ -117,6 +118,7 @@ function App() {
             <Route path="/settings"  element={<Settings  token={token} user={user} />} />
             <Route path="/radar"     element={<ThreatRadar token={token} />} />
             <Route path="/map"       element={<ThreatMap token={token} />} />
+            <Route path="/security"  element={<Security  token={token} />} />
             <Route path="*"          element={<Navigate to="/" />} />
           </Route>
         )}

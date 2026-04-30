@@ -7,6 +7,7 @@ import {
 import { Line } from 'react-chartjs-2';
 import { useTelemetry } from '../context/TelemetryContext';
 import TrafficLedger from '../components/TrafficLedger';
+import BrainInsight from '../components/BrainInsight';
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Legend, Filler);
 
@@ -530,6 +531,8 @@ export default function Dashboard({ token }) {
           </div>
         )}
       </section>
+
+      <BrainInsight token={token} />
 
       <section className="glass-panel elevated-panel">
         <div className="panel-heading">

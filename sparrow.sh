@@ -18,6 +18,7 @@
 #     sparrow cli              → Agent & firewall CLI
 #     sparrow brain            → Chat with Sparrow Brain (NLP AI)
 #     sparrow brain analyze    → Run brain learning cycle
+#     sparrow watchdog         → Check watchdog logs
 #     sparrow setup            → Initial guard setup
 #     sparrow help             → Show this help
 # =================================================================
@@ -85,7 +86,8 @@ show_menu() {
   echo -e "  ${GREEN}[11]${RESET} ${BOLD}Brain Analyze${RESET}           ${DIM}Run AI learning cycle on logs${RESET}"
   echo ""
   echo -e "${CYAN}${BOLD}  ── SETUP ─────────────────────────────────────────${RESET}"
-  echo -e "  ${GREEN}[12]${RESET} ${BOLD}Initial Guard Setup${RESET}     ${DIM}Bootstrap a fresh guard server${RESET}"
+  echo -e "  ${GREEN}[12]${RESET} ${BOLD}Watchdog Status${RESET}          ${DIM}Check auto-healing logs${RESET}"
+  echo -e "  ${GREEN}[13]${RESET} ${BOLD}Initial Guard Setup${RESET}     ${DIM}Bootstrap a fresh guard server${RESET}"
   echo ""
   echo -e "  ${RED}[0]${RESET} Exit"
   echo ""
@@ -156,6 +158,11 @@ do_command() {
       esac
       ;;
 
+    watchdog)
+      echo -e "${CYAN}--- Watchdog Logs (Last 20) ---${RESET}"
+      tail -n 20 /var/log/sbs/watchdog.log 2>/dev/null || echo "No logs yet."
+      ;;
+
     setup)
       need_root setup
       run_script setup-guard.sh "$@"
@@ -179,6 +186,7 @@ do_command() {
       echo -e "  ${BOLD}sparrow cli${RESET}               Agent & firewall CLI"
       echo -e "  ${BOLD}sparrow brain${RESET}             Chat with Sparrow Brain AI"
       echo -e "  ${BOLD}sparrow brain analyze${RESET}     Run AI learning cycle"
+      echo -e "  ${BOLD}sparrow watchdog${RESET}          Check watchdog logs"
       echo -e "  ${BOLD}sparrow setup${RESET}             Initial guard setup"
       echo ""
       ;;
@@ -219,7 +227,11 @@ interactive_menu() {
         echo -e "${CYAN}[Brain] Running learning cycle...${RESET}"
         node "$SCRIPT_DIR/sparrow-brain.js" --apply
         ;;
-      12) need_root setup; run_script setup-guard.sh ;;
+      12) 
+        echo -e "${CYAN}--- Watchdog Logs (Last 20) ---${RESET}"
+        tail -n 20 /var/log/sbs/watchdog.log 2>/dev/null || echo "No logs yet."
+        ;;
+      13) need_root setup; run_script setup-guard.sh ;;
       0|exit|quit|q)
         echo -e "${GREEN}  Goodbye. Stay protected.${RESET}\n"
         exit 0

@@ -339,9 +339,12 @@ ok "sparrow command installed — run 'sparrow' from anywhere"
 step "Setting Up Cron Jobs"
 CRON_DISK="0 3 1 * * root bash $SCRIPT_DIR/sbs-disk-manager.sh auto >> /var/log/sbs/disk-manager.log 2>&1"
 CRON_BRAIN="0 * * * * root node $SCRIPT_DIR/sparrow-brain.js --apply >> /var/log/sbs/brain.log 2>&1"
+CRON_WATCHDOG="*/5 * * * * root bash $SCRIPT_DIR/sbs-watchdog.sh >> /var/log/sbs/watchdog.log 2>&1"
 echo "$CRON_DISK"  > /etc/cron.d/sparrowx-disk
 echo "$CRON_BRAIN" > /etc/cron.d/sparrowx-brain
-chmod 644 /etc/cron.d/sparrowx-disk /etc/cron.d/sparrowx-brain
+echo "$CRON_WATCHDOG" > /etc/cron.d/sparrowx-watchdog
+chmod 644 /etc/cron.d/sparrowx-disk /etc/cron.d/sparrowx-brain /etc/cron.d/sparrowx-watchdog
+ok "Cron: watchdog runs every 5 minutes"
 ok "Cron: disk manager runs 1st of month at 3am"
 ok "Cron: brain learning runs every hour"
 
