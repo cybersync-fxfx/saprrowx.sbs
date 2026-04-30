@@ -72,6 +72,8 @@ export function TelemetryProvider({ token, children }) {
     error: '',
   });
 
+  const [notifications, setNotifications] = useState([]);
+
   // -- Persist to localStorage whenever key state changes --------------------
   const statsRef      = useRef(stats);
   const cpuHistRef    = useRef(cpuHistory);
@@ -364,6 +366,24 @@ export function TelemetryProvider({ token, children }) {
 
       if (msg.type === 'radar_ban' || msg.type === 'radar_mode_changed') {
         refreshGuardBlocklistSummary();
+        
+        if (msg.type === 'radar_ban') {
+          setNotifications(prev => [{
+            id: Date.now() + Math.random(),
+            type: 'danger',
+            title: 'Threat Neutralized',
+            message: `IP ${msg.ip} was automatically banned by Threat Radar. Reason: ${msg.reason || 'Suspicious activity'}`,
+            timestamp: new Date().toISOString(),
+          }, ...prev].slice(0, 10));
+        } else if (msg.type === 'radar_mode_changed') {
+          setNotifications(prev => [{
+            id: Date.now() + Math.random(),
+            type: 'warning',
+            title: 'Defense Mode Changed',
+            message: `System security level switched to ${msg.mode.toUpperCase()} mode by admin.`,
+            timestamp: new Date().toISOString(),
+          }, ...prev].slice(0, 10));
+        }
       }
 
       if (msg.type === 'command_result') {
@@ -489,6 +509,8 @@ export function TelemetryProvider({ token, children }) {
     lastUpdateMs,
     sendCommand,
     refreshGuardBlocklistSummary,
+    notifications,
+    setNotifications,
     isConnected: agentStatus === 'CONNECTED',
     commandReady: agentStatus === 'CONNECTED' && wsState === 'open',
   };

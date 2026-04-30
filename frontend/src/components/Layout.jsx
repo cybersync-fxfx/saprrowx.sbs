@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { Activity, Terminal, Shield, ListX, Download, Key, Settings, LogOut, RadioTower, ServerCog, Globe, Sparkles } from 'lucide-react';
 import { useTelemetry } from '../context/TelemetryContext';
+import NotificationCenter from './NotificationCenter';
 
 export default function Layout({ user, setToken }) {
   const navigate = useNavigate();
@@ -104,6 +105,7 @@ export default function Layout({ user, setToken }) {
           <Outlet />
         </main>
       </div>
+      <NotificationCenter />
     </div>
   );
 }
