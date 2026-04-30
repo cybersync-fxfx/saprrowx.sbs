@@ -76,6 +76,11 @@ export default function Layout({ user, setToken }) {
                 return <div key={idx} className="sidebar-section">{item.section}</div>;
               }
 
+              // Hide admin-only items
+              if (item.path === '/security' && user?.role !== 'admin') {
+                return null;
+              }
+
               const isActive = location.pathname === item.path;
 
               return (

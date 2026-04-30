@@ -996,7 +996,7 @@ app.get('/api/guard/blocklist', authMiddleware, (req, res) => {
 
     res.json({
       ips: enrichedIps,
-      table: `${result.family} ${result.table}`,
+      table: req.user.role === 'admin' ? `${result.family} ${result.table}` : 'SparrowX Shield',
     });
   } catch (err) {
     res.status(500).json({ error: err.message || 'Failed to read guard blocklist.' });
@@ -1009,10 +1009,10 @@ app.get('/api/guard/blocklist/summary', authMiddleware, (req, res) => {
     count: summary.count,
     totalBanned: Number(db.sbsBanTotal || 0),
     totalBannedUpdatedAt: db.sbsBanTotalUpdatedAt || null,
-    table: summary.tableLabel,
+    table: req.user.role === 'admin' ? summary.tableLabel : 'SparrowX Shield',
     updatedAt: summary.updatedAt ? new Date(summary.updatedAt).toISOString() : null,
     guardReady: summary.guardReady,
-    error: summary.error,
+    error: req.user.role === 'admin' ? summary.error : (summary.error ? 'Guard engine is busy' : ''),
   });
 });
 
@@ -3218,7 +3218,7 @@ app.get('/api/radar/ip/:ip', authMiddleware, async (req, res) => {
 
 // Security Status Check (Layers 1-4)
 app.get('/api/internal/security-status', authMiddleware, async (req, res) => {
-  if (req.user.role !== 'admin') return res.status(403).json({ error: 'Unauthorized' });
+  if (req.user?.role !== 'admin') return res.status(403).json({ error: 'Unauthorized: Admin access required for infrastructure metrics.' });
 
   const runCheck = (command, timeout = 5000) => {
     try {
@@ -3324,6 +3324,7 @@ app.post('/api/internal/security-fix', authMiddleware, async (req, res) => {
 
 // Brain Insight (AI Memory)
 app.get('/api/internal/brain-insight', authMiddleware, async (req, res) => {
+  if (req.user?.role !== 'admin') return res.status(403).json({ error: 'Unauthorized' });
   const brainMemoryPath = path.join(__dirname, 'intel', 'brain', 'memory.json');
   const taughtPath = path.join(__dirname, 'intel', 'brain', 'taught-knowledge.json');
 
