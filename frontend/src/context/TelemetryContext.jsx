@@ -373,6 +373,17 @@ export function TelemetryProvider({ token, children }) {
       tcp: [...prev.tcp.slice(1), s.connections || 0],
       udp: [...prev.udp.slice(1), 0],
     }));
+
+    // Process Guard Logs
+    if (s.log && s.log.trim()) {
+      const lines = s.log.split('\n').filter(l => l.trim()).map(l => {
+        let level = 'default';
+        if (/\[GUARD\].*ban|drop|block/i.test(l)) level = 'error';
+        if (/\[GUARD\].*accept/i.test(l))         level = 'success';
+        return { text: `[${new Date().toLocaleTimeString()}] ${l}`, level };
+      });
+      setGuardLogs(prev => [...lines, ...prev].slice(0, 500));
+    }
   }, []);
 
   const connect = useCallback(() => {

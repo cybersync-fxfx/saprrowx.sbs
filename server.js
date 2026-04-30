@@ -248,6 +248,13 @@ function broadcastGuardStats() {
   const memFree = os.freemem();
   const memPercent = ((memTotal - memFree) / memTotal) * 100;
 
+  // Read guard logs
+  let log = '';
+  try {
+    const logData = execSync('tail -n 20 /var/log/sbs/attacks.log 2>/dev/null').toString();
+    log = logData.split('\n').filter(l => l.trim()).map(l => '[GUARD] ' + l.trim()).join('\n');
+  } catch (_) {}
+
   const stats = {
     connections: Number(db.sbsBanTotal || 0) > 0 ? Math.floor(Math.random() * 5) + 35 : 0, // Mock for now or ss -ant
     established: 0,
@@ -273,8 +280,9 @@ function broadcastGuardStats() {
     os: `${os.type()} ${os.release()}`,
     iface: netNow.iface,
     telemetrySource: '/proc/net/dev',
-    telemetryAgentBuild: 'guard-native',
+    telemetryAgentBuild: 'netdev-v2',
     agentBuild: 'guard-v1',
+    log,
   };
 
   // Broadcast ONLY to admins

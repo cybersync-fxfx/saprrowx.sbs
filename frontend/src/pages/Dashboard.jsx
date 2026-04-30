@@ -16,7 +16,7 @@ const CHART_POINTS = 60;
 export default function Dashboard({ token }) {
   const {
     stats, cpuHistory, netHistory, connHistory, logs,
-    trafficEvents, isConnected, wsState, lastUpdateMs,
+    trafficEvents, isConnected, wsState, lastUpdateMs, viewMode,
   } = useTelemetry();
 
   const [graphTab, setGraphTab] = useState('bandwidth'); // 'bandwidth' | 'tcp' | 'udp'
@@ -336,7 +336,7 @@ export default function Dashboard({ token }) {
         </div>
         <div className="hero-status-stack">
           <div className={`status-pill ${isConnected ? 'connected' : 'disconnected'}`}>
-            {isConnected ? '● Agent Online' : '○ No Agent'}
+            {isConnected ? (viewMode === 'global' ? '● Guard Active' : '● Agent Online') : '○ No Agent'}
           </div>
           <div className="meta-chip" style={{ color: ageSec !== null && ageSec < 3 ? 'var(--accent-cyan)' : undefined }}>
             {telemetryLabel}
