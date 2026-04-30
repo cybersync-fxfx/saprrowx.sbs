@@ -37,7 +37,7 @@ export default function Layout({ user, setToken }) {
     { path: '/settings', name: 'Settings', icon: <Settings size={18} />, caption: 'Account details and network controls' },
   ];
 
-  const { isConnected, agentStatus, wsState } = useTelemetry();
+  const { isConnected, agentStatus, wsState, viewMode, setViewMode } = useTelemetry();
 
   return (
     <div className="app-layout">

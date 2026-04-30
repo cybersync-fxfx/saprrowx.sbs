@@ -76,7 +76,11 @@ export function TelemetryProvider({ token, children }) {
   const [viewMode, setViewMode] = useState(localStorage.getItem('sparrowx_view_mode') || 'global'); // 'global' or 'agent'
 
   useEffect(() => {
-    localStorage.setItem('sparrowx_view_mode', viewMode);
+    try {
+      localStorage.setItem('sparrowx_view_mode', viewMode);
+    } catch (e) {
+      // Ignore
+    }
   }, [viewMode]);
 
   // -- Persist to localStorage whenever key state changes --------------------
