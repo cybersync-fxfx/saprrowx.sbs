@@ -159,8 +159,15 @@ mkdir -p /var/log/sbs
 if [ -f "$SCRIPT_DIR/configs/nftables-sparrowx.conf" ]; then
   # Replace placeholder interface name with detected one
   sed "s/IFACE_PLACEHOLDER/$IFACE/g" "$SCRIPT_DIR/configs/nftables-sparrowx.conf" \
-    > /etc/nftables.conf
-  nft -f /etc/nftables.conf 2>>"$LOG_FILE" && ok "nftables rules applied" || warn "nftables apply failed — check $LOG_FILE"
+    > /etc/nftables.conf.sparrowx
+  
+  # Apply without flushing global ruleset
+  nft -f /etc/nftables.conf.sparrowx 2>>"$LOG_FILE" && ok "nftables rules applied" || warn "nftables apply failed — check $LOG_FILE"
+  
+  # Note: To make persistent, user should include this file in /etc/nftables.conf
+  if ! grep -q "nftables.conf.sparrowx" /etc/nftables.conf; then
+     echo "include \"/etc/nftables.conf.sparrowx\"" >> /etc/nftables.conf
+  fi
   systemctl enable nftables
 else
   # Minimal fallback ruleset
@@ -239,9 +246,10 @@ defaults
 
 frontend sparrowx_front
   bind *:80
-  bind *:443 ssl crt /etc/haproxy/cert.pem
-  http-request track-sc0 src table sparrowx_rate
-  http-request deny deny_status 429 if { sc_http_req_rate(0) gt 100 }
+  bind *:443 ssl crt /etc/haproxy/certs/sparrowx.pem alpn h2,http/1.1
+  
+  # Redirect HTTP to HTTPS
+  http-request redirect scheme https code 301 if !{ ssl_fc }
   # Block bad bots
   acl bad_agent hdr_sub(user-agent) -i sqlmap nikto masscan zgrab nuclei
   http-request deny if bad_agent

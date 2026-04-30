@@ -14,7 +14,11 @@ cd "$(dirname "$0")"
 
 # 1. Compile
 echo "[→] Compiling XDP program..."
-clang -O2 -target bpf -c sparrowx_xdp.c -o $OBJ
+ARCH=$(uname -m | sed 's/x86_64/x86/')
+clang -O2 -target bpf \
+      -D__TARGET_ARCH_$(uname -m | sed 's/x86_64/x86/') \
+      -I/usr/include/$(uname -m)-linux-gnu \
+      -c sparrowx_xdp.c -o $OBJ
 
 if [ ! -f "$OBJ" ]; then
     echo "[✗] Compilation failed!"
