@@ -326,10 +326,12 @@ class RadarScanner {
         established: 0,
         udp: 0,
         localPorts: new Set(),
+        localIps: new Set(),
       };
 
       current[metric] += 1;
       if (local?.port) current.localPorts.add(local.port);
+      if (local?.ip) current.localIps.add(local.ip);
       snapshot.set(remote.ip, current);
     }
   }
@@ -569,6 +571,7 @@ class RadarScanner {
           delta: result.delta,
           synRatio: Number(result.synRatio.toFixed(3)),
           totalConnections: result.totalConnections,
+          localIps: [...(metrics.localIps || [])],
         });
 
         this.observations.set(ip, {
@@ -605,6 +608,11 @@ class RadarScanner {
 
   async logThreat(ip, result, action, metrics) {
     const reason = result.reasons.join(', ') || 'Suspicious traffic pattern';
+    const targetIp = [...(metrics.localIps || [])][0] || null;
+    const targetAgentId = targetIp && typeof this.options.getAgentByIp === 'function' 
+      ? this.options.getAgentByIp(targetIp) 
+      : null;
+
     try {
       await this.supabaseAdmin.from('threat_radar').insert({
         ip,
@@ -612,14 +620,16 @@ class RadarScanner {
         reason,
         abuseipdb_score: 0,
         action,
+        target_ip: targetIp,
+        target_agent_id: targetAgentId
       });
-      this.saveToLocalIntel(ip, result, action, metrics);
+      this.saveToLocalIntel(ip, result, action, metrics, targetAgentId);
     } catch (e) {
       console.error('[Radar] DB log error:', e.message);
     }
   }
 
-  saveToLocalIntel(ip, result, action, metrics) {
+  saveToLocalIntel(ip, result, action, metrics, targetAgentId = null) {
     try {
       const date = new Date().toISOString().split('T')[0];
       const time = new Date().toISOString();
@@ -632,6 +642,7 @@ class RadarScanner {
         score: result.score,
         action,
         reasons: result.reasons,
+        target_agent_id: targetAgentId,
         metrics: {
           tcp: metrics.tcp,
           syn: metrics.syn,

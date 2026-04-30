@@ -2614,9 +2614,14 @@ setInterval(fetchGlobalBannedTotal, 15000);
 // -- Radar Scanner Integration --------------------------------
 const RadarScanner = require('./radar-scanner');
 radar = new RadarScanner(supabaseAdmin, {
-  broadcastToUser,
   onBan: applyRadarAutoBan,
   listBlockedIps: () => listGuardBlockedIps().ips,
+  getAgentByIp: (localIp) => {
+    // Find agent by Tunnel IP or Client Public IP
+    const tunnels = listTunnelConfigs();
+    const match = tunnels.find(t => t.clientTunnelIp === localIp || t.clientPublicIp === localIp);
+    return match ? match.agentId : null;
+  },
   listAgentIps: () => Object.values(db.agents || {}).map(a => a.ip).filter(Boolean),
 });
 radar.start();
@@ -2972,29 +2977,54 @@ app.get('/api/radar/stats', authMiddleware, async (req, res) => {
     const since = new Date(Date.now() - 86400000).toISOString();
     const guardBlocklist = getGuardBlocklistSummary();
 
-    const { data: recent, error: recentError } = await supabaseAdmin
+    const userAgent = Object.values(db.agents).find(a => a.userId === req.user.id);
+    const agentId = userAgent ? userAgent.agentId : null;
+
+    let query = supabaseAdmin
       .from('threat_radar')
-      .select('*')
+      .select('*');
+    
+    if (agentId) {
+      query = query.eq('target_agent_id', agentId);
+    }
+
+    const { data: recent, error: recentError } = await query
       .order('detected_at', { ascending: false })
       .limit(50);
     if (recentError) throw recentError;
       
-    const { count: scannedToday, error: scannedError } = await supabaseAdmin
+    const scannedQuery = supabaseAdmin
       .from('threat_radar')
       .select('*', { count: 'exact', head: true })
       .gte('detected_at', since);
+    if (agentId) scannedQuery.eq('target_agent_id', agentId);
+    const { count: scannedToday, error: scannedError } = await scannedQuery;
     if (scannedError) throw scannedError;
 
-    const { count: blockedToday, error: blockedError } = await supabaseAdmin
+    const blockedQuery = supabaseAdmin
       .from('threat_radar')
       .select('*', { count: 'exact', head: true })
       .eq('action', 'banned')
       .gte('detected_at', since);
+    if (agentId) blockedQuery.eq('target_agent_id', agentId);
+    const { count: blockedToday, error: blockedError } = await blockedQuery;
     if (blockedError) throw blockedError;
+
+    // Filter liveScores by agent
+    let liveScores = radar ? radar.getLiveScores() : [];
+    if (agentId) {
+      // Find IPs associated with this agent
+      const tunnels = listTunnelConfigs();
+      const agentTunnels = tunnels.filter(t => t.agentId === agentId);
+      const agentIps = agentTunnels.map(t => [t.clientTunnelIp, t.clientPublicIp]).flat().filter(Boolean);
+      liveScores = liveScores.filter(score => 
+        (score.localIps || []).some(lip => agentIps.includes(lip))
+      );
+    }
 
     res.json({
       recent: recent || [],
-      liveScores: radar ? radar.getLiveScores() : [],
+      liveScores,
       stats: {
         scannedToday: scannedToday || 0,
         blockedToday: blockedToday || 0,

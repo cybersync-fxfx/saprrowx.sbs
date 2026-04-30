@@ -38,6 +38,7 @@ export default function ThreatMap({ token }) {
   const inspectIp = (ip) => {
     if (!ip || !token) return;
     setSelectedIp(ip);
+    setLookupData(null);
     setLookupLoading(true);
     setLookupError('');
 
@@ -297,16 +298,93 @@ export default function ThreatMap({ token }) {
           border: '1px solid rgba(255,255,255,0.03)',
           borderRadius: '12px'
         }}>
-          <div style={{ padding: '20px', background: '#0d0f15', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
-            <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 'bold', color: '#fff', letterSpacing: '0.5px' }}>Live Access Ledger</h3>
-            <p style={{ margin: '5px 0 0 0', fontSize: '0.75rem', color: '#888' }}>Intercepting real-time payloads</p>
+          <div style={{ padding: '18px 20px', background: '#0d0f15', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+            <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 'bold', color: '#fff', letterSpacing: '0.5px' }}>IP Intelligence</h3>
+            <p style={{ margin: '5px 0 0 0', fontSize: '0.75rem', color: '#888' }}>Live lookup from radar, guard, DNS, and history</p>
+          </div>
+
+          <div style={{
+            padding: '14px',
+            borderBottom: '1px solid rgba(255,255,255,0.05)',
+            background: selectedIp ? 'rgba(0,216,255,0.025)' : 'rgba(255,255,255,0.01)'
+          }}>
+            {!selectedIp && (
+              <div style={{ color: '#666', fontSize: '0.78rem', lineHeight: 1.5 }}>
+                Select any attack marker or ledger row.
+              </div>
+            )}
+
+            {selectedIp && (
+              <div style={{ border: `1px solid ${lookupColor}55`, borderRadius: '8px', padding: '12px', background: 'rgba(0,0,0,0.2)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', alignItems: 'flex-start' }}>
+                  <div>
+                    <div style={{ color: '#fff', fontSize: '1rem', fontWeight: 800, fontFamily: 'monospace' }}>{selectedIp}</div>
+                    <div style={{ color: '#888', fontSize: '0.68rem', marginTop: '3px', textTransform: 'uppercase', letterSpacing: '0.8px' }}>
+                      {lookupLoading ? 'Lookup running' : (lookupData?.geo?.source || 'Waiting')}
+                    </div>
+                  </div>
+                  <div style={{
+                    color: lookupColor,
+                    border: `1px solid ${lookupColor}66`,
+                    background: `${lookupColor}18`,
+                    borderRadius: '999px',
+                    padding: '4px 9px',
+                    fontSize: '0.68rem',
+                    fontWeight: 800,
+                    textTransform: 'uppercase',
+                    whiteSpace: 'nowrap'
+                  }}>
+                    {lookupData ? `${lookupData.action} ${lookupData.score}` : 'inspect'}
+                  </div>
+                </div>
+
+                {lookupError && (
+                  <div style={{ marginTop: '10px', color: '#ff6b6b', fontSize: '0.76rem' }}>{lookupError}</div>
+                )}
+
+                {lookupData && (
+                  <>
+                    <div style={{ marginTop: '12px', color: '#ddd', fontSize: '0.8rem', lineHeight: 1.45 }}>
+                      {locationParts.length ? locationParts.join(', ') : 'Location unknown'}
+                      {lookupData.geo?.timezone ? <span style={{ color: '#777' }}> / {lookupData.geo.timezone}</span> : null}
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginTop: '12px' }}>
+                      {[
+                        ['Guard', lookupData.guard?.blocked ? 'blocked' : 'clear'],
+                        ['Seen', compactValue(lookupData.history?.database?.count || lookupData.history?.local?.eventCount || 0)],
+                        ['SYN', compactValue(lookupData.live?.syn)],
+                        ['UDP', compactValue(lookupData.live?.udp)],
+                        ['Ports', compactValue(lookupData.live?.ports)],
+                        ['Delta', compactValue(lookupData.live?.delta)],
+                      ].map(([label, value]) => (
+                        <div key={label} style={{ border: '1px solid rgba(255,255,255,0.05)', borderRadius: '6px', padding: '7px 8px', background: 'rgba(255,255,255,0.015)' }}>
+                          <div style={{ color: '#666', fontSize: '0.62rem', textTransform: 'uppercase', letterSpacing: '0.8px' }}>{label}</div>
+                          <div style={{ color: label === 'Guard' && value === 'blocked' ? '#ff3333' : '#fff', fontSize: '0.8rem', marginTop: '2px', fontFamily: 'monospace' }}>{value}</div>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div style={{ marginTop: '10px', color: '#aaa', fontSize: '0.72rem', lineHeight: 1.45 }}>
+                      <div>Last seen: {formatDate(lookupData.history?.lastSeen)}</div>
+                      <div>PTR: {lookupData.reverseDns?.length ? lookupData.reverseDns.join(', ') : '-'}</div>
+                      <div>Reason: {lookupData.reasons?.length ? lookupData.reasons.join(', ') : '-'}</div>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+
+          <div style={{ padding: '12px 15px', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+            <h3 style={{ margin: 0, fontSize: '0.85rem', fontWeight: 'bold', color: '#fff', letterSpacing: '0.5px' }}>Live Access Ledger</h3>
           </div>
 
           <div style={{ flex: 1, overflowY: 'auto', padding: '15px' }} className="custom-scrollbar">
             {liveScores.map(item => {
               const color = getColor(item.action, item.score);
               return (
-                <div key={item.id} style={{
+                <button key={item.id} type="button" onClick={() => inspectIp(item.ip)} style={{
                   background: 'rgba(255,255,255,0.01)',
                   border: `1px solid rgba(255,255,255,0.03)`,
                   borderLeft: `4px solid ${color}`,
@@ -316,13 +394,17 @@ export default function ThreatMap({ token }) {
                   transition: 'all 0.2s ease-in-out',
                   display: 'flex',
                   justifyContent: 'space-between',
-                  alignItems: 'center'
+                  alignItems: 'center',
+                  width: '100%',
+                  color: 'inherit',
+                  cursor: 'pointer',
+                  textAlign: 'left'
                 }}>
                   <div>
                     <div style={{ color: '#fff', fontWeight: 'bold', fontSize: '0.85rem', fontFamily: 'monospace' }}>{item.ip}</div>
                     <div style={{ fontSize: '0.7rem', color: '#aaa', marginTop: '5px', display: 'flex', alignItems: 'center', gap: '5px' }}>
-                      <span>{item.country !== 'Unknown' ? `📍 ${item.country}` : '🌐 Unknown'}</span>
-                      <span>•</span>
+                      <span>{item.city ? `${item.city}, ` : ''}{item.country !== 'Unknown' ? item.country : 'Unknown'}</span>
+                      <span>/</span>
                       <span style={{ color: '#777' }}>{item.reason}</span>
                     </div>
                   </div>
@@ -343,7 +425,7 @@ export default function ThreatMap({ token }) {
                       {item.action}
                     </div>
                   </div>
-                </div>
+                </button>
               );
             })}
 
