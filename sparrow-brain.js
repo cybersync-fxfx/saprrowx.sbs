@@ -111,7 +111,7 @@ function parseIntelLogs() {
   return events;
 }
 
-/** Parse storage/*/logs/*.jsonl (written by server.js per-agent) */
+// Parse storage/<agent>/logs/*.jsonl (written by server.js per-agent)
 function parseStorageLogs() {
   const events = [];
   if (!fs.existsSync(STORAGE_DIR)) return events;
