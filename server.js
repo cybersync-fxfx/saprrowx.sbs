@@ -922,77 +922,7 @@ app.get('/api/me', authMiddleware, (req, res) => {
   });
 });
 
-app.post('/api/ai/analyze', authMiddleware, async (req, res) => {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    return res.status(503).json({ error: 'Gemini API key not configured in server environment.' });
-  }
-
-  let logContent = '';
-  try {
-    if (fs.existsSync('/var/log/sbs/attacks.log')) {
-      const raw = fs.readFileSync('/var/log/sbs/attacks.log', 'utf8');
-      const lines = raw.split('\n').filter(Boolean);
-      logContent = lines.slice(-100).join('\n');
-    }
-  } catch (e) {}
-
-  if (!logContent.trim()) {
-    logContent = 'No security events recorded in logs yet.';
-  }
-
-  const prompt = `You are Sparrow AI, an advanced cybersecurity monitoring intelligence. 
-You are directly integrated into the Sparrowx DDoS Guard dashboard. 
-Review these recent firewall and attack logs and provide a summary of the system health, attack vectors, and hardening tips.
-Adopt a futuristic, intelligent assistant tone (highly alert, protective). 
-
-Logs:
-${logContent}`;
-
-  try {
-    const models = ['gemini-1.5-flash', 'gemini-1.5-pro'];
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${models[0]}:generateContent?key=${apiKey}`;
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: req.body.prompt ? `${prompt}\n\nUser query: ${req.body.prompt}` : prompt }] }]
-      })
-    });
-
-    if (!response.ok) {
-      const errText = await response.text();
-      console.error('[Gemini Primary Error]:', errText);
-      
-      // Try fallback to gemini-1.5-pro
-      const fallbackUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key=${apiKey}`;
-      const fbResponse = await fetch(fallbackUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: req.body.prompt ? `${prompt}\n\nUser query: ${req.body.prompt}` : prompt }] }]
-        })
-      });
-
-      if (!fbResponse.ok) {
-        const fbErrText = await fbResponse.text();
-        console.error('[Gemini Fallback Error]:', fbErrText);
-        throw new Error(`Gemini API error: ${fbErrText}`);
-      }
-      
-      const fbData = await fbResponse.json();
-      const fbAnalysis = fbData.candidates?.[0]?.content?.parts?.[0]?.text || 'No response from AI unit.';
-      return res.json({ analysis: fbAnalysis });
-    }
-
-    const data = await response.json();
-    const analysis = data.candidates?.[0]?.content?.parts?.[0]?.text || 'No response from AI unit.';
-    res.json({ analysis });
-
-  } catch (err) {
-    res.status(500).json({ error: err.message || 'AI execution failed' });
-  }
-});
+// AI analyze endpoint removed
 
 app.post('/api/me/regenerate-key', authMiddleware, privilegedSupabaseMiddleware, async (req, res) => {
   const newKey = 'spx_' + crypto.randomBytes(16).toString('hex');
@@ -3050,6 +2980,7 @@ app.use((req, res) => {
 server.listen(PORT, () => {
   console.log(`\x1b[32m[ok] ${PRODUCT_NAME} server listening on port ${PORT}\x1b[0m`);
   
+  /*
   sendDiscordWebhook('info', {
     embeds: [{
       title: '🚀 Sparrowx Server Started',
@@ -3063,4 +2994,5 @@ server.listen(PORT, () => {
       footer: { text: 'Sparrowx System Info' }
     }]
   });
+  */
 });
