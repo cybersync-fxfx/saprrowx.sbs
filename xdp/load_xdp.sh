@@ -15,7 +15,7 @@ cd "$(dirname "$0")"
 # 1. Compile
 echo "[→] Compiling XDP program..."
 ARCH=$(uname -m | sed 's/x86_64/x86/')
-clang -O2 -target bpf \
+clang -O2 -g -target bpf \
       -D__TARGET_ARCH_$(uname -m | sed 's/x86_64/x86/') \
       -I/usr/include/$(uname -m)-linux-gnu \
       -c sparrowx_xdp.c -o $OBJ
