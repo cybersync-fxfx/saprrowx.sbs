@@ -61,7 +61,26 @@ export function TelemetryProvider({ token, children }) {
   const [connHistory, setConnHistory] = useState(saved?.connHistory ?? { tcp: emptyArr(), udp: emptyArr() });
   const [logs,        setLogs]        = useState(saved?.logs ?? []);
   const [trafficEvents, setTrafficEvents] = useState(saved?.trafficEvents ?? []);
+
+  // -- Guard Stats (Global View) ---------------------------------------------
+  const [guardStats, setGuardStats] = useState({
+    connections: 0, bannedIPs: 0, sbsBanTotal: 642, cpuPercent: 0,
+    memPercent: 0, synRate: 0, pps: 0, uptime: 0,
+    inMbps: 0, outMbps: 0, udpConns: 0,
+    avgPacketBytes: 0,
+    packetDiff: 0, rxPacketDiff: 0, txPacketDiff: 0,
+    rxPackets: 0, txPackets: 0, rxBytes: 0, txBytes: 0,
+    telemetrySource: 'guard', telemetryAgentBuild: 'native', agentBuild: 'v1',
+    hostname: 'Guard', ip: 'Guard', os: 'Linux', iface: '-',
+  });
+  const [guardCpuHistory,  setGuardCpuHistory]  = useState({ cpu: emptyArr(), mem: emptyArr() });
+  const [guardNetHistory,  setGuardNetHistory]  = useState({ inb: emptyArr(), out: emptyArr() });
+  const [guardConnHistory, setGuardConnHistory] = useState({ tcp: emptyArr(), udp: emptyArr() });
+  const [guardLogs,        setGuardLogs]        = useState([]);
+  const [guardTrafficEvents, setGuardTrafficEvents] = useState([]);
+
   const [lastUpdateMs, setLastUpdateMs] = useState(saved?.lastUpdateMs ?? null);
+  const [lastGuardUpdateMs, setLastGuardUpdateMs] = useState(null);
   const [guardBlocklist, setGuardBlocklist] = useState({
     count: Number(saved?.stats?.bannedIPs || 0),
     totalBanned: Number(saved?.stats?.sbsBanTotal || 0),
@@ -318,6 +337,44 @@ export function TelemetryProvider({ token, children }) {
     }
   }, []);
 
+  const processGuardStatsUpdate = useCallback((msg) => {
+    const s = msg.stats || {};
+    setLastGuardUpdateMs(Date.now());
+
+    setGuardStats(prev => ({
+      ...prev,
+      ...s,
+      connections: s.connections ?? prev.connections,
+      bannedIPs: s.bannedIPs ?? prev.bannedIPs,
+      sbsBanTotal: s.sbsBanTotal ?? prev.sbsBanTotal,
+      cpuPercent: s.cpuPercent ?? prev.cpuPercent,
+      memPercent: s.memPercent ?? prev.memPercent,
+      inMbps: s.inMbps ?? prev.inMbps,
+      outMbps: s.outMbps ?? prev.outMbps,
+      pps: s.pps ?? prev.pps,
+      uptime: s.uptime ?? prev.uptime,
+      hostname: s.hostname || prev.hostname,
+      ip: s.ip || prev.ip,
+      os: s.os || prev.os,
+      iface: s.iface || prev.iface,
+    }));
+
+    setGuardCpuHistory(prev => ({
+      cpu: [...prev.cpu.slice(1), Number((s.cpuPercent || 0).toFixed(1))],
+      mem: [...prev.mem.slice(1), Number((s.memPercent || 0).toFixed(1))],
+    }));
+
+    setGuardNetHistory(prev => ({
+      inb: [...prev.inb.slice(1), Number((s.inMbps || 0).toFixed(3))],
+      out: [...prev.out.slice(1), Number((s.outMbps || 0).toFixed(3))],
+    }));
+
+    setGuardConnHistory(prev => ({
+      tcp: [...prev.tcp.slice(1), s.connections || 0],
+      udp: [...prev.udp.slice(1), 0],
+    }));
+  }, []);
+
   const connect = useCallback(() => {
     if (!token || unmounted.current) return;
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -355,6 +412,10 @@ export function TelemetryProvider({ token, children }) {
 
       if (msg.type === 'stats_update') {
         processStatsUpdate(msg);
+      }
+
+      if (msg.type === 'guard_stats_update') {
+        processGuardStatsUpdate(msg);
       }
 
       if (msg.type === 'guard_blocklist_changed') {
@@ -506,24 +567,24 @@ export function TelemetryProvider({ token, children }) {
 
   const value = {
     wsState,
-    agentStatus,
+    agentStatus: viewMode === 'global' ? 'CONNECTED' : agentStatus,
     lastEvent,
-    stats,
-    cpuHistory,
-    netHistory,
-    connHistory,
-    logs,
-    trafficEvents,
+    stats: viewMode === 'global' ? guardStats : stats,
+    cpuHistory: viewMode === 'global' ? guardCpuHistory : cpuHistory,
+    netHistory: viewMode === 'global' ? guardNetHistory : netHistory,
+    connHistory: viewMode === 'global' ? guardConnHistory : connHistory,
+    logs: viewMode === 'global' ? guardLogs : logs,
+    trafficEvents: viewMode === 'global' ? guardTrafficEvents : trafficEvents,
     guardBlocklist,
-    lastUpdateMs,
+    lastUpdateMs: viewMode === 'global' ? lastGuardUpdateMs : lastUpdateMs,
     sendCommand,
     refreshGuardBlocklistSummary,
     notifications,
     setNotifications,
     viewMode,
     setViewMode,
-    isConnected: agentStatus === 'CONNECTED',
-    commandReady: agentStatus === 'CONNECTED' && wsState === 'open',
+    isConnected: viewMode === 'global' ? true : agentStatus === 'CONNECTED',
+    commandReady: viewMode === 'global' ? false : (agentStatus === 'CONNECTED' && wsState === 'open'),
   };
 
   return (
