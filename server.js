@@ -950,7 +950,8 @@ Logs:
 ${logContent}`;
 
   try {
-    const url = `https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+    const models = ['gemini-1.5-flash', 'gemini-1.5-pro'];
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${models[0]}:generateContent?key=${apiKey}`;
     const response = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -963,8 +964,8 @@ ${logContent}`;
       const errText = await response.text();
       console.error('[Gemini Primary Error]:', errText);
       
-      // Try fallback to gemini-1.5-flash
-      const fallbackUrl = `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+      // Try fallback to gemini-1.5-pro
+      const fallbackUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key=${apiKey}`;
       const fbResponse = await fetch(fallbackUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
