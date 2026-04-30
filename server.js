@@ -3026,7 +3026,27 @@ app.get('/api/radar/stats', authMiddleware, async (req, res) => {
 app.get('/api/internal/security-status', authMiddleware, async (req, res) => {
   if (req.user.role !== 'admin') return res.status(403).json({ error: 'Unauthorized' });
 
-  const { execSync } = require('child_process');
+  const runCheck = (command, timeout = 5000) => {
+    try {
+      return {
+        ok: true,
+        output: execSync(command, {
+          encoding: 'utf8',
+          shell: '/bin/bash',
+          timeout,
+          stdio: ['ignore', 'pipe', 'pipe'],
+        }).trim(),
+      };
+    } catch (err) {
+      return {
+        ok: false,
+        output: `${err.stdout || ''}${err.stderr || ''}`.trim(),
+      };
+    }
+  };
+
+  const serviceState = (name) => runCheck(`systemctl is-active ${name} 2>/dev/null || true`).output || 'unknown';
+  const domain = process.env.SPARROWX_DOMAIN || 'sparrowx.sbs';
   const status = {
     xdp: { active: false, details: null },
     nftables: { active: false, details: null },
@@ -3037,32 +3057,37 @@ app.get('/api/internal/security-status', authMiddleware, async (req, res) => {
 
   try {
     // 1. Check XDP
-    try {
-      const xdpCheck = execSync('ip link show | grep xdp', { encoding: 'utf8' });
-      status.xdp.active = xdpCheck.length > 0;
-      status.xdp.details = xdpCheck.trim();
-    } catch (e) { status.xdp.details = 'Not found or not supported'; }
+    const xdpCheck = runCheck("ip -details link show 2>/dev/null | grep -A1 -i 'prog/xdp\\| xdp ' || true");
+    status.xdp.active = /prog\/xdp|\sxdp\s/i.test(xdpCheck.output);
+    status.xdp.details = status.xdp.active ? xdpCheck.output : 'Not attached';
 
     // 2. Check nftables
-    try {
-      const nftCheck = execSync('nft list ruleset | grep sparrowx_shield', { encoding: 'utf8' });
-      status.nftables.active = nftCheck.length > 0;
-      status.nftables.details = status.nftables.active ? 'SparrowX ruleset detected' : 'Table missing';
-    } catch (e) { status.nftables.details = 'nftables not running or table missing'; }
+    const nftCheck = runCheck('nft list table inet sparrowx_shield >/dev/null 2>&1 && echo sparrowx_shield-active || true');
+    status.nftables.active = nftCheck.output.includes('sparrowx_shield-active');
+    status.nftables.details = status.nftables.active ? 'SparrowX ruleset detected' : 'nftables table missing';
 
     // 3. Check HAProxy
-    try {
-      const haCheck = execSync('systemctl is-active haproxy', { encoding: 'utf8' });
-      status.haproxy.active = haCheck.trim() === 'active';
-      status.haproxy.details = haCheck.trim();
-    } catch (e) { status.haproxy.details = 'Service not installed'; }
+    const haState = serviceState('haproxy');
+    const haListen = runCheck("ss -lntp 2>/dev/null | grep -E ':(80|443) .*haproxy' || true").output;
+    const haProc = runCheck('pgrep -a haproxy 2>/dev/null || true').output;
+    const haHealth = runCheck(`curl -kfsS --max-time 4 https://${domain}/api/health >/dev/null 2>&1 && echo https-health-ok || true`, 6000).output;
+    status.haproxy.active = haState === 'active' || Boolean(haListen) || Boolean(haProc) || haHealth.includes('https-health-ok');
+    status.haproxy.details = status.haproxy.active
+      ? [
+          `systemd: ${haState}`,
+          haListen ? 'ports: 80/443 via HAProxy' : null,
+          haHealth.includes('https-health-ok') ? `https: ${domain}/api/health OK` : null,
+        ].filter(Boolean).join(' | ')
+      : `inactive (${haState})`;
 
     // 4. Check FastNetMon
-    try {
-      const fnmCheck = execSync('systemctl is-active fastnetmon', { encoding: 'utf8' });
-      status.fastnetmon.active = fnmCheck.trim() === 'active';
-      status.fastnetmon.details = fnmCheck.trim();
-    } catch (e) { status.fastnetmon.details = 'Service not installed'; }
+    const fnmState = serviceState('fastnetmon');
+    const fnmProc = runCheck('pgrep -a fastnetmon 2>/dev/null || true').output;
+    const fnmBan = runCheck("tail -120 /var/log/fastnetmon.log 2>/dev/null | grep -q 'We call ban script: yes' && echo ban-enabled || true").output;
+    status.fastnetmon.active = fnmState === 'active' || Boolean(fnmProc);
+    status.fastnetmon.details = status.fastnetmon.active
+      ? [`systemd: ${fnmState}`, fnmBan.includes('ban-enabled') ? 'ban script enabled' : null].filter(Boolean).join(' | ')
+      : `inactive (${fnmState})`;
 
     res.json(status);
   } catch (err) {
@@ -3077,8 +3102,17 @@ app.post('/api/internal/security-fix', authMiddleware, async (req, res) => {
   const { spawn } = require('child_process');
 
   try {
-    // Run sparrow audit in the background
-    const child = spawn('bash', [path.join(__dirname, 'sparrow.sh'), 'audit'], {
+    const candidates = ['fix.sh', 'sparrow-healthfix.sh', 'sbs-watchdog.sh', 'audit-infra.sh'];
+    const script = candidates
+      .map((name) => path.join(__dirname, name))
+      .find((candidate) => fs.existsSync(candidate));
+
+    if (!script) {
+      return res.status(500).json({ error: 'No repair script found in /opt/sbs.' });
+    }
+
+    const child = spawn('bash', [script], {
+      cwd: __dirname,
       detached: true,
       stdio: 'ignore'
     });
@@ -3086,7 +3120,8 @@ app.post('/api/internal/security-fix', authMiddleware, async (req, res) => {
 
     res.json({ 
       success: true, 
-      message: 'Security audit and auto-fix started in the background.'
+      script: path.basename(script),
+      message: `Security health auto-fix started with ${path.basename(script)}.`
     });
   } catch (err) {
     res.status(500).json({ error: 'Failed to trigger auto-fix', message: err.message });
