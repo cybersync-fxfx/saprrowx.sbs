@@ -1,13 +1,15 @@
 import { useState, useEffect } from 'react';
 import { Sparkles, Brain, Target, Clock, ShieldCheck, Zap, AlertTriangle } from 'lucide-react';
+import { useTelemetry } from '../context/TelemetryContext';
 
 export default function BrainInsight({ token }) {
+  const { viewMode } = useTelemetry();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
 
   const fetchInsight = async () => {
     try {
-      const res = await fetch('/api/internal/brain-insight', {
+      const res = await fetch(`/api/internal/brain-insight?scope=${viewMode}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (res.ok) {
@@ -25,7 +27,7 @@ export default function BrainInsight({ token }) {
     fetchInsight();
     const id = setInterval(fetchInsight, 300000); // 5 mins
     return () => clearInterval(id);
-  }, []);
+  }, [viewMode]);
 
   if (loading || !data || !data.memory.lastAnalyzed) {
     return (
