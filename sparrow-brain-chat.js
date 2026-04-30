@@ -1,392 +1,430 @@
 'use strict';
 /**
- * SPARROWX BRAIN CHAT - Local NLP Interactive Interface
- * Usage: node sparrow-brain-chat.js
+ * SPARROWX BRAIN — Natural Language Interface
+ * Conversational, context-aware threat intelligence assistant.
  */
-const fs = require('fs');
-const path = require('path');
+const fs      = require('fs');
+const path    = require('path');
 const readline = require('readline');
 
-const BRAIN_DIR   = path.join(__dirname, 'intel', 'brain');
-const MEMORY_FILE = path.join(BRAIN_DIR, 'memory.json');
-const TEACH_FILE  = path.join(BRAIN_DIR, 'taught-knowledge.json');
-const CHAT_LOG    = path.join(BRAIN_DIR, 'chat-history.jsonl');
-const ATTACK_LOG  = '/var/log/sbs/attacks.log';
+const BRAIN_DIR    = path.join(__dirname, 'intel', 'brain');
+const MEMORY_FILE  = path.join(BRAIN_DIR, 'memory.json');
+const TEACH_FILE   = path.join(BRAIN_DIR, 'taught-knowledge.json');
+const CHAT_LOG     = path.join(BRAIN_DIR, 'chat-history.jsonl');
+const ATTACK_LOG   = '/var/log/sbs/attacks.log';
 
 fs.mkdirSync(BRAIN_DIR, { recursive: true });
 
-// ── Color helpers ────────────────────────────────────────────────
-const C = {
-  green:  s => `\x1b[32m${s}\x1b[0m`,
-  cyan:   s => `\x1b[36m${s}\x1b[0m`,
-  yellow: s => `\x1b[33m${s}\x1b[0m`,
-  red:    s => `\x1b[31m${s}\x1b[0m`,
-  bold:   s => `\x1b[1m${s}\x1b[0m`,
-  dim:    s => `\x1b[2m${s}\x1b[0m`,
+// ── Terminal colors ──────────────────────────────────────────────
+const G = s => `\x1b[32m${s}\x1b[0m`;
+const C = s => `\x1b[36m${s}\x1b[0m`;
+const Y = s => `\x1b[33m${s}\x1b[0m`;
+const R = s => `\x1b[31m${s}\x1b[0m`;
+const B = s => `\x1b[1m${s}\x1b[0m`;
+const D = s => `\x1b[2m${s}\x1b[0m`;
+
+// ── Helpers ──────────────────────────────────────────────────────
+const pick = arr => arr[Math.floor(Math.random() * arr.length)];
+const loadMemory = () => {
+  try { if (fs.existsSync(MEMORY_FILE)) return JSON.parse(fs.readFileSync(MEMORY_FILE,'utf8')); } catch(_){}
+  return { knownAttackers:{}, attackPatterns:{}, hourlyActivity:{}, bannedIpCount:0, totalEventsProcessed:0, totalCycles:0, learnedThresholds:null, lastAnalyzedAt:null };
 };
+const loadKnowledge = () => {
+  try { if (fs.existsSync(TEACH_FILE)) return JSON.parse(fs.readFileSync(TEACH_FILE,'utf8')); } catch(_){}
+  return { trustedIps:[], suspiciousIps:[], notes:[] };
+};
+const saveKnowledge = k => fs.writeFileSync(TEACH_FILE, JSON.stringify(k,null,2));
+const logChat = (role, text) => fs.appendFileSync(CHAT_LOG, JSON.stringify({ts:new Date().toISOString(),role,text})+'\n');
+const extractIp = s => { const m = s.match(/\b(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\b/); return m?m[1]:null; };
 
-// ── Load persistent memory ───────────────────────────────────────
-function loadMemory() {
-  try {
-    if (fs.existsSync(MEMORY_FILE)) return JSON.parse(fs.readFileSync(MEMORY_FILE, 'utf8'));
-  } catch (_) {}
-  return { knownAttackers: {}, attackPatterns: {}, hourlyActivity: {}, bannedIpCount: 0, totalEventsProcessed: 0, totalCycles: 0, learnedThresholds: null, lastAnalyzedAt: null };
+// ── Conversation context ─────────────────────────────────────────
+const ctx = { lastIntent: null, lastIp: null, topic: null };
+
+// ── Fuzzy NLP tokenizer ──────────────────────────────────────────
+function tokenize(input) {
+  return input.toLowerCase()
+    .replace(/[^\w\s.]/g,'')
+    .split(/\s+/)
+    .filter(w => !['the','a','an','is','are','what','who','how','me','i','my','can','do','you','of','to','and','in'].includes(w));
 }
 
-// ── Load taught knowledge ─────────────────────────────────────────
-function loadKnowledge() {
-  try {
-    if (fs.existsSync(TEACH_FILE)) return JSON.parse(fs.readFileSync(TEACH_FILE, 'utf8'));
-  } catch (_) {}
-  return { trustedIps: [], suspiciousIps: [], customRules: [], notes: [] };
+function score(tokens, keywords) {
+  return keywords.filter(k => tokens.some(t => t.includes(k) || k.includes(t))).length;
 }
 
-function saveKnowledge(k) {
-  fs.writeFileSync(TEACH_FILE, JSON.stringify(k, null, 2));
-}
-
-// ── Log helper ───────────────────────────────────────────────────
-function logChat(role, text) {
-  fs.appendFileSync(CHAT_LOG, JSON.stringify({ ts: new Date().toISOString(), role, text }) + '\n');
-}
-
-// ── NLP Intent Engine ────────────────────────────────────────────
+// ── Intent classifier ────────────────────────────────────────────
 const INTENTS = [
-  // Status / overview
-  { patterns: ['how are you', 'status', "what's happening", 'overview', 'summary', 'report', 'show me', 'what do you know', 'update me'], fn: 'STATUS' },
-  // Threat queries
-  { patterns: ['top attacker', 'worst ip', 'most attack', 'biggest threat', 'who is attacking', 'top threat', 'repeat offender'], fn: 'TOP_ATTACKERS' },
-  { patterns: ['attack type', 'what kind of attack', 'type of threat', 'pattern', 'how they attack', 'attack method'], fn: 'ATTACK_TYPES' },
-  { patterns: ['peak hour', 'when do they attack', 'busiest time', 'what time', 'attack schedule', 'worst hour'], fn: 'PEAK_HOURS' },
-  { patterns: ['total ban', 'how many banned', 'ban count', 'blocked ip', 'how many block'], fn: 'BAN_COUNT' },
-  // IP lookup
-  { patterns: ['look up', 'lookup', 'check ip', 'tell me about', 'info on', 'what about ip', 'investigate'], fn: 'IP_LOOKUP' },
-  // Last attacks
-  { patterns: ['last attack', 'recent attack', 'latest threat', 'recent event', 'what happened recently'], fn: 'RECENT_ATTACKS' },
-  // Thresholds
-  { patterns: ['threshold', 'radar setting', 'current config', 'sensitivity', 'learned setting', 'recommended'], fn: 'THRESHOLDS' },
-  // Teaching
-  { patterns: ['trust', 'whitelist', 'my server', 'safe ip', 'allow', 'add trusted', 'mark as safe'], fn: 'TEACH_TRUST' },
-  { patterns: ['suspicious', 'watch', 'flag', 'mark as bad', 'add suspect', 'that ip is bad', 'keep eye on'], fn: 'TEACH_SUSPECT' },
-  { patterns: ['remember', 'note', 'write down', 'dont forget', "don't forget", 'keep in mind', 'add note'], fn: 'TEACH_NOTE' },
-  { patterns: ['what did i teach', 'what you know', 'my rules', 'custom rules', 'show knowledge', 'show notes'], fn: 'SHOW_KNOWLEDGE' },
-  { patterns: ['forget', 'remove', 'delete rule', 'clear note', 'undo'], fn: 'FORGET' },
-  // Help
-  { patterns: ['help', 'what can you do', 'commands', '?', 'how to', 'guide'], fn: 'HELP' },
-  // Disk
-  { patterns: ['disk', 'log size', 'storage', 'space', 'how big', 'log file'], fn: 'DISK_INFO' },
-  // Refresh / analyze
-  { patterns: ['analyze', 'refresh', 'learn', 'rescan', 'update knowledge', 'relearn', 'scan again'], fn: 'ANALYZE' },
+  { id:'GREET',       keys:['hi','hello','hey','sup','morning','evening','hiya','yo'] },
+  { id:'STATUS',      keys:['status','summary','overview','happening','report','update','situation','know','doing','tell'] },
+  { id:'ATTACKERS',   keys:['attacker','worst','offender','threat','attacking','hacker','ip','enemy','who'] },
+  { id:'PATTERNS',    keys:['pattern','type','kind','attack','method','how','technique','flood','syn','udp','scan','brute'] },
+  { id:'HOURS',       keys:['hour','time','when','peak','busy','night','day','schedule'] },
+  { id:'BANS',        keys:['ban','block','blocked','count','many','total','number'] },
+  { id:'LOOKUP',      keys:['check','lookup','look','about','investigate','info','tell','detail','specific'] },
+  { id:'RECENT',      keys:['recent','last','latest','just','happened','new','today'] },
+  { id:'THRESHOLDS',  keys:['threshold','setting','config','sensitivity','tune','learn','recommend'] },
+  { id:'TRUST',       keys:['trust','safe','allow','whitelist','mine','my server','friendly'] },
+  { id:'FLAG',        keys:['flag','watch','suspicious','suspect','bad','dangerous','mark'] },
+  { id:'NOTE',        keys:['remember','note','write','forget','keep','mind','store'] },
+  { id:'KNOWLEDGE',   keys:['taught','custom','rule','note','know','saved','memory'] },
+  { id:'FORGET',      keys:['forget','remove','delete','clear','undo','unwatch'] },
+  { id:'DISK',        keys:['disk','space','log','size','storage','big','full'] },
+  { id:'ANALYZE',     keys:['analyze','learn','scan','refresh','rescan','train','update'] },
+  { id:'HELP',        keys:['help','guide','what','command','option','can','do'] },
+  { id:'THANKS',      keys:['thanks','thank','great','awesome','good','nice','cool','perfect','love'] },
+  { id:'HOW_WORK',    keys:['work','brain','built','made','function','explain','yourself'] },
 ];
 
-function detectIntent(input) {
-  const lower = input.toLowerCase().trim();
+function classify(input) {
+  const tokens = tokenize(input);
+  const ip = extractIp(input);
+  if (ip) return 'LOOKUP';
+  let best = { id: 'UNKNOWN', sc: 0 };
   for (const intent of INTENTS) {
-    if (intent.patterns.some(p => lower.includes(p))) return intent.fn;
+    const s = score(tokens, intent.keys);
+    if (s > best.sc) best = { id: intent.id, sc: s };
   }
-  // IP address directly typed
-  if (/\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/.test(lower)) return 'IP_LOOKUP';
-  return 'UNKNOWN';
+  return best.sc > 0 ? best.id : 'UNKNOWN';
 }
 
-function extractIp(input) {
-  const match = input.match(/\b(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\b/);
-  return match ? match[1] : null;
+// ── Response bank ────────────────────────────────────────────────
+const R_GREET = [
+  "Hey! Sparrow here. What do you want to know about your infrastructure?",
+  "Hi there! I'm watching your network 24/7. What's on your mind?",
+  "Hello! Ready to dig into some threat data. What do you need?",
+  "Hey, good to hear from you. What's up?",
+];
+const R_THANKS = [
+  "Anytime. I'm always here watching.",
+  "Happy to help. Anything else you want to know?",
+  "Of course! That's what I'm here for.",
+  "No problem at all. Stay safe out there.",
+];
+const R_UNKNOWN = [
+  "I'm not quite sure what you mean. Try asking about attackers, threat patterns, a specific IP, or say 'help'.",
+  "Hmm, I didn't catch that. I understand questions about threats, IPs, attack patterns, bans — try rephrasing?",
+  "Not sure I follow. You can ask me things like 'who is attacking?' or 'check 1.2.3.4'.",
+  "That one went over my head. Try 'help' to see what I can do.",
+];
+const R_HOW_WORK = [
+  "I read your attack logs and intel files, tokenize and classify threats, track repeat offenders, and learn patterns over time. No cloud, no API — just local statistical analysis. I get smarter every time you run 'analyze'.",
+  "I'm a local NLP engine trained on your own attack data. I read /var/log/sbs/attacks.log and the intel logs, classify threats into categories like SYN floods and port scans, and recommend radar thresholds based on what I've seen.",
+  "Think of me as a security analyst that never sleeps. I read your logs, spot patterns, remember bad actors, and help you tune defenses — all offline, all private.",
+];
+
+// ── Response generators ──────────────────────────────────────────
+function genStatus(mem, know) {
+  const n = Object.keys(mem.knownAttackers).length;
+  const top = Object.entries(mem.attackPatterns).sort((a,b)=>b[1].count-a[1].count)[0];
+  const last = mem.lastAnalyzedAt ? new Date(mem.lastAnalyzedAt).toLocaleString() : 'not yet';
+  const lines = [
+    pick([
+      `Alright, here's where things stand:`,
+      `Here's my current read on your network:`,
+      `Sure, let me break it down for you:`,
+    ]),
+    `  • I've processed ${B(mem.totalEventsProcessed)} threat events across ${mem.totalCycles} learning cycles.`,
+    `  • Currently tracking ${B(n)} unique attacker IPs.`,
+    `  • Total ban events logged: ${B(mem.bannedIpCount)}.`,
+  ];
+  if (top) lines.push(`  • The most common attack type I've seen is ${Y(top[0])} — hit you ${top[1].count} times.`);
+  if (know.trustedIps.length) lines.push(`  • You've whitelisted ${know.trustedIps.length} IP(s) as trusted.`);
+  if (know.suspiciousIps.length) lines.push(`  • You've flagged ${know.suspiciousIps.length} IP(s) as suspicious.`);
+  lines.push(`  • Last trained: ${D(last)}`);
+  if (mem.totalEventsProcessed === 0) lines.push(`\n  ${Y("I don't have much data yet — run 'analyze' to teach me from your logs.")}`);
+  return lines.join('\n');
 }
 
-// ── Response Handlers ────────────────────────────────────────────
-function handleStatus(mem, knowledge) {
-  const patterns = Object.keys(mem.attackPatterns).length;
-  const attackers = Object.keys(mem.knownAttackers).length;
-  const topType = Object.entries(mem.attackPatterns).sort((a, b) => b[1].count - a[1].count)[0];
-  const last = mem.lastAnalyzedAt ? new Date(mem.lastAnalyzedAt).toLocaleString() : 'never';
-  let r = `Here's what I know right now:\n`;
-  r += `  • I've processed ${C.bold(mem.totalEventsProcessed)} threat events across ${mem.totalCycles} analysis cycles.\n`;
-  r += `  • I'm tracking ${C.bold(attackers)} unique attacker IPs.\n`;
-  r += `  • Total bans logged: ${C.bold(mem.bannedIpCount)}.\n`;
-  r += `  • I've seen ${patterns} distinct attack patterns.\n`;
-  if (topType) r += `  • Most common attack: ${C.yellow(topType[0])} (${topType[1].count} times).\n`;
-  r += `  • ${knowledge.trustedIps.length} trusted IPs, ${knowledge.suspiciousIps.length} flagged IPs in custom rules.\n`;
-  r += `  • Last analyzed: ${C.dim(last)}`;
-  return r;
-}
-
-function handleTopAttackers(mem) {
-  const top = Object.entries(mem.knownAttackers)
-    .sort((a, b) => b[1].hitCount - a[1].hitCount)
-    .slice(0, 8);
-  if (!top.length) return `I haven't seen any attackers yet. Run an analysis cycle first.`;
-  let r = `${C.bold('Top repeat offenders I\'m tracking:')}\n`;
-  top.forEach(([ip, d], i) => {
+function genAttackers(mem) {
+  const top = Object.entries(mem.knownAttackers).sort((a,b)=>b[1].hitCount-a[1].hitCount).slice(0,8);
+  if (!top.length) return pick([
+    "I haven't logged any attackers yet. Run 'analyze' and I'll learn from your logs.",
+    "No attackers in memory yet. Try running 'analyze' first so I have data to work with.",
+  ]);
+  const lines = [pick([
+    `Here are the worst offenders I'm tracking right now:`,
+    `These are the IPs that keep coming back:`,
+    `Alright, the repeat attackers — here's who's been hitting you the most:`,
+  ])];
+  top.forEach(([ip,d],i) => {
     const types = Object.keys(d.types).join(', ');
-    r += `  ${i + 1}. ${C.red(ip.padEnd(18))} — ${d.hitCount} hits  [${types}]\n`;
-    r += `     Last seen: ${d.lastSeen ? new Date(d.lastSeen).toLocaleString() : 'unknown'}\n`;
+    const age = d.lastSeen ? `last seen ${new Date(d.lastSeen).toLocaleDateString()}` : '';
+    lines.push(`  ${i+1}. ${R(ip.padEnd(18))} — ${B(d.hitCount)} hits  [${Y(types)}]  ${D(age)}`);
   });
-  return r.trimEnd();
+  return lines.join('\n');
 }
 
-function handleAttackTypes(mem) {
-  const types = Object.entries(mem.attackPatterns).sort((a, b) => b[1].count - a[1].count);
-  if (!types.length) return `No attack patterns learned yet. Let me analyze some logs first.`;
-  let r = `${C.bold('Attack patterns I\'ve identified:')}\n`;
-  const total = types.reduce((a, b) => a + b[1].count, 0);
-  types.forEach(([type, d]) => {
-    const pct = total > 0 ? Math.round(d.count / total * 100) : 0;
-    const bar = '▓'.repeat(Math.round(pct / 5));
-    r += `  ${C.yellow(type.padEnd(20))}  ${bar.padEnd(20)} ${pct}% (${d.count} events, peak score: ${d.peakScore})\n`;
+function genPatterns(mem) {
+  const types = Object.entries(mem.attackPatterns).sort((a,b)=>b[1].count-a[1].count);
+  if (!types.length) return "I haven't identified any attack patterns yet. Run 'analyze' and I'll dig into your logs.";
+  const total = types.reduce((a,b)=>a+b[1].count,0);
+  const lines = [pick([
+    `Based on everything I've learned, here's how they're attacking you:`,
+    `Here's the breakdown of attack methods I've observed:`,
+    `Let me show you what attack types have been hitting your network:`,
+  ])];
+  types.forEach(([type,d]) => {
+    const pct = total>0 ? Math.round(d.count/total*100) : 0;
+    const bar = '▓'.repeat(Math.round(pct/5)).padEnd(20);
+    lines.push(`  ${Y(type.padEnd(22))} ${bar} ${pct}%  (${d.count} events, peak score ${d.peakScore})`);
   });
-  return r.trimEnd();
+  return lines.join('\n');
 }
 
-function handlePeakHours(mem) {
-  const hours = Object.entries(mem.hourlyActivity).sort((a, b) => b[1] - a[1]);
-  if (!hours.length) return `Not enough data to determine peak hours yet.`;
+function genHours(mem) {
+  const hours = Object.entries(mem.hourlyActivity).sort((a,b)=>b[1]-a[1]);
+  if (!hours.length) return "Not enough data to find peak hours yet. Run 'analyze' so I can figure out when attacks are worst.";
   const max = hours[0][1];
-  let r = `${C.bold('Attack activity by hour (UTC):')}\n`;
-  hours.slice(0, 8).forEach(([h, count]) => {
-    const bar = '█'.repeat(Math.min(25, Math.round(count / max * 25)));
-    const label = count === max ? C.red(`${h}:00`) : `${h}:00`;
-    r += `  ${label.padEnd(7)} ${bar.padEnd(25)} ${count}\n`;
+  const lines = [pick([
+    `Here's when attacks are hitting you hardest (UTC):`,
+    `Based on my logs, the peak attack windows look like this:`,
+    `Your busiest threat hours — watch these windows:`,
+  ])];
+  hours.slice(0,6).forEach(([h,count]) => {
+    const bar = '█'.repeat(Math.min(25,Math.round(count/max*25))).padEnd(25);
+    const label = count===max ? R(`${h}:00`) : `${h}:00`;
+    lines.push(`  ${label.padEnd(7)} ${bar} ${count}`);
   });
-  r += `\n  ${C.yellow('Highest risk window:')} ${hours[0][0]}:00 – ${String(Number(hours[0][0]) + 1).padStart(2,'0')}:00`;
-  return r;
+  lines.push(`\n  ${Y('Highest risk:')} ${hours[0][0]}:00 — consider tightening radar mode during this window.`);
+  return lines.join('\n');
 }
 
-function handleBanCount(mem) {
-  return `I have ${C.bold(mem.bannedIpCount)} ban events in memory, tracking ${Object.keys(mem.knownAttackers).length} unique attacker IPs total.\nThis number grows as I process more log cycles.`;
-}
-
-function handleIpLookup(input, mem, knowledge) {
-  const ip = extractIp(input);
-  if (!ip) return `Which IP do you want me to look up? (e.g. "check 1.2.3.4")`;
-
+function genLookup(input, mem, know) {
+  const ip = extractIp(input) || ctx.lastIp;
+  if (!ip) return "Which IP do you want me to look up? Just type the address, like '45.23.11.4'.";
+  ctx.lastIp = ip;
   const data = mem.knownAttackers[ip];
-  const trusted = knowledge.trustedIps.includes(ip);
-  const suspect = knowledge.suspiciousIps.includes(ip);
-
-  let r = `${C.bold(`Intel on ${ip}:`)}\n`;
-
-  if (trusted) r += `  ⚠️  ${C.green('YOU MARKED THIS AS TRUSTED')} — treat with care.\n`;
-  if (suspect) r += `  🚩  ${C.red('YOU FLAGGED THIS AS SUSPICIOUS.')}\n`;
-
+  const trusted = know.trustedIps.includes(ip);
+  const suspect = know.suspiciousIps.includes(ip);
+  const lines = [pick([`Alright, here's what I know about ${B(ip)}:`, `Let me pull up my intel on ${B(ip)}:`])];
+  if (trusted)  lines.push(`  ${G('⚠  You marked this IP as trusted — it\'s on your whitelist.')} `);
+  if (suspect)  lines.push(`  ${R('🚩  You flagged this as suspicious. Keep an eye on it.')} `);
   if (!data) {
-    r += `  I have no threat history on this IP in my memory.\n`;
-    r += `  It may be clean, or it may not have appeared in analyzed logs yet.`;
-    return r;
+    lines.push(`  I have no threat history on this IP. It may be clean, or it just hasn't shown up in my analyzed logs yet.`);
+    return lines.join('\n');
   }
-
-  const types = Object.entries(data.types).map(([t, c]) => `${t}(${c})`).join(', ');
-  r += `  Hit count   : ${C.red(data.hitCount)} events\n`;
-  r += `  Attack types: ${C.yellow(types)}\n`;
-  r += `  First seen  : ${data.firstSeen ? new Date(data.firstSeen).toLocaleString() : 'unknown'}\n`;
-  r += `  Last seen   : ${data.lastSeen  ? new Date(data.lastSeen).toLocaleString()  : 'unknown'}\n`;
-  r += data.hitCount > 20
-    ? `  ${C.red('Assessment: HIGH RISK — this IP is a repeat offender.')}`
-    : data.hitCount > 5
-    ? `  ${C.yellow('Assessment: MODERATE — has shown suspicious behavior.')}`
-    : `  ${C.dim('Assessment: LOW — limited activity seen so far.')}`;
-  return r;
+  const types = Object.entries(data.types).map(([t,c])=>`${t}(×${c})`).join(', ');
+  lines.push(`  Hit count   : ${R(data.hitCount+'')} events`);
+  lines.push(`  Attack types: ${Y(types)}`);
+  lines.push(`  First seen  : ${data.firstSeen ? new Date(data.firstSeen).toLocaleString():'unknown'}`);
+  lines.push(`  Last seen   : ${data.lastSeen  ? new Date(data.lastSeen).toLocaleString() :'unknown'}`);
+  if (data.hitCount > 20)      lines.push(`\n  ${R('My assessment: HIGH RISK. This IP is a serial offender.')}`);
+  else if (data.hitCount > 5)  lines.push(`\n  ${Y('My assessment: MODERATE. Has shown suspicious behaviour multiple times.')}`);
+  else                         lines.push(`\n  ${D('My assessment: LOW activity so far. Worth monitoring though.')}`);
+  return lines.join('\n');
 }
 
-function handleRecentAttacks() {
-  if (!fs.existsSync(ATTACK_LOG)) return `No attack log found at ${ATTACK_LOG}.`;
-  const lines = fs.readFileSync(ATTACK_LOG, 'utf8').split('\n').filter(Boolean).slice(-10);
-  if (!lines.length) return `The attack log is empty right now.`;
-  let r = `${C.bold('Last 10 attack log entries:')}\n`;
-  lines.forEach(l => { r += `  ${C.dim(l)}\n`; });
-  return r.trimEnd();
+function genRecent() {
+  if (!fs.existsSync(ATTACK_LOG)) return "I can't find the attack log at /var/log/sbs/attacks.log. Has the agent been installed on your guard server?";
+  const lines = fs.readFileSync(ATTACK_LOG,'utf8').split('\n').filter(Boolean).slice(-8);
+  if (!lines.length) return "The attack log exists but is empty right now. Looks quiet — which is good!";
+  return pick([`Here are the last few attack log entries:`, `Latest activity from your logs:`])
+    + '\n' + lines.map(l=>`  ${D(l)}`).join('\n');
 }
 
-function handleThresholds(mem) {
+function genThresholds(mem) {
   const t = mem.learnedThresholds;
-  if (!t) return `I haven't generated learned thresholds yet. Run "analyze" first.`;
-  let r = `${C.bold('My recommended radar thresholds (based on learned patterns):')}\n`;
-  r += `  Ban threshold    : ${C.yellow(t.threshold)}  (default 90)\n`;
-  r += `  Watch threshold  : ${C.yellow(t.watchThreshold)}  (default 55)\n`;
-  r += `  SYN ban trigger  : ${C.yellow(t.synBan)}  (default 90)\n`;
-  r += `  UDP ban trigger  : ${C.yellow(t.udpBan)}  (default 360)\n`;
-  r += `  Burst ban trigger: ${C.yellow(t.burstBan)}  (default 180)\n`;
-  r += `  Port fanout ban  : ${C.yellow(t.portFanoutBan)}  (default 12)\n`;
-  r += `  Based on ${t._attackFrequency} observed attack events.\n`;
-  r += `  To apply: ${C.dim('node sparrow-brain.js --apply')}`;
-  return r;
+  if (!t) return "I haven't generated learned thresholds yet. Run 'analyze' and I'll crunch the data and give you recommendations.";
+  const lines = [pick([
+    `Based on everything I've seen, here are the radar settings I'd recommend:`,
+    `Here's what I'd tune your radar to, based on observed attack patterns:`,
+  ])];
+  lines.push(`  Ban threshold     : ${Y(t.threshold+'')}  (factory default: 90)`);
+  lines.push(`  Watch threshold   : ${Y(t.watchThreshold+'')}  (factory default: 55)`);
+  lines.push(`  SYN ban trigger   : ${Y(t.synBan+'')}  (factory default: 90)`);
+  lines.push(`  UDP ban trigger   : ${Y(t.udpBan+'')}  (factory default: 360)`);
+  lines.push(`  Burst ban trigger : ${Y(t.burstBan+'')}  (factory default: 180)`);
+  lines.push(`  Port fanout ban   : ${Y(t.portFanoutBan+'')}  (factory default: 12)`);
+  lines.push(`\n  These are calibrated on ${D(t._attackFrequency+' observed attack events')}.`);
+  lines.push(`  To apply them to your live radar: ${D('node sparrow-brain.js --apply')}`);
+  return lines.join('\n');
 }
 
-function handleTeachTrust(input, knowledge) {
+function genTrust(input, know) {
   const ip = extractIp(input);
-  if (!ip) return `Tell me which IP to trust. Example: "trust 1.2.3.4" or "my server is 1.2.3.4"`;
-  if (!knowledge.trustedIps.includes(ip)) {
-    knowledge.trustedIps.push(ip);
-    saveKnowledge(knowledge);
-    return `${C.green('Got it.')} I've marked ${C.bold(ip)} as trusted. I'll remember not to flag this IP as a threat.`;
-  }
-  return `${ip} is already in my trusted list.`;
+  if (!ip) return "Sure, which IP should I trust? Just give me the address.";
+  if (know.trustedIps.includes(ip)) return `${ip} is already on your trusted list. I won't flag it.`;
+  know.trustedIps.push(ip); saveKnowledge(know);
+  return pick([
+    `Got it — ${B(ip)} is now trusted. I'll make sure not to flag it as a threat.`,
+    `Done. I've whitelisted ${B(ip)}. It won't get caught in my radar.`,
+    `${B(ip)} added to your trusted list. Consider it safe in my books.`,
+  ]);
 }
 
-function handleTeachSuspect(input, knowledge) {
+function genFlag(input, know) {
   const ip = extractIp(input);
-  if (!ip) return `Which IP should I watch? Example: "flag 1.2.3.4 as suspicious"`;
-  if (!knowledge.suspiciousIps.includes(ip)) {
-    knowledge.suspiciousIps.push(ip);
-    saveKnowledge(knowledge);
-    return `${C.yellow('Noted.')} I've flagged ${C.bold(ip)} as suspicious. I'll keep a close eye on it.`;
-  }
-  return `${ip} is already in my watch list.`;
+  if (!ip) return "Which IP should I keep an eye on? Give me the address and I'll flag it.";
+  if (know.suspiciousIps.includes(ip)) return `I already have ${ip} flagged as suspicious. It's on my watchlist.`;
+  know.suspiciousIps.push(ip); saveKnowledge(know);
+  return pick([
+    `Noted. ${B(ip)} is now flagged. I'll treat it as suspicious from now on.`,
+    `${B(ip)} added to my watchlist. I'll pay extra attention to any activity from it.`,
+    `Flagged. I'm watching ${B(ip)} closely.`,
+  ]);
 }
 
-function handleTeachNote(input, knowledge) {
-  const noteMatch = input.match(/(?:remember|note|write down|keep in mind|add note)[:\s]+(.+)/i);
-  const note = noteMatch ? noteMatch[1].trim() : input.replace(/^(remember|note|dont forget|don't forget)\s*/i, '').trim();
-  if (!note || note.length < 3) return `What should I remember? Tell me like: "remember that port 8080 is my dev server"`;
-  const entry = { text: note, addedAt: new Date().toISOString() };
-  knowledge.notes.push(entry);
-  saveKnowledge(knowledge);
-  return `${C.green('Stored.')} I'll remember: "${note}"`;
+function genNote(input, know) {
+  const m = input.match(/(?:remember|note|write|keep in mind)[:\s]+(.+)/i);
+  const note = m ? m[1].trim() : input.replace(/^(remember|note)\s*/i,'').trim();
+  if (!note || note.length < 3) return "What would you like me to remember? Tell me like: 'remember that port 8080 is my dev server'";
+  know.notes.push({ text:note, addedAt:new Date().toISOString() });
+  saveKnowledge(know);
+  return pick([
+    `Stored. I'll keep that in mind: "${note}"`,
+    `Got it, I've written that down: "${note}"`,
+    `Noted: "${note}" — I won't forget it.`,
+  ]);
 }
 
-function handleShowKnowledge(knowledge) {
-  let r = `${C.bold('Everything you\'ve taught me:')}\n`;
-  r += `\n  ${C.green('Trusted IPs:')} ${knowledge.trustedIps.length ? knowledge.trustedIps.join(', ') : 'none'}\n`;
-  r += `  ${C.yellow('Flagged IPs:')} ${knowledge.suspiciousIps.length ? knowledge.suspiciousIps.join(', ') : 'none'}\n`;
-  r += `\n  ${C.cyan('Notes:')}\n`;
-  if (!knowledge.notes.length) { r += `  (none yet)\n`; }
-  else knowledge.notes.forEach((n, i) => { r += `  ${i + 1}. ${n.text} ${C.dim('(' + new Date(n.addedAt).toLocaleDateString() + ')')}\n`; });
-  return r.trimEnd();
+function genShowKnowledge(know) {
+  const lines = [pick([`Here's everything you've personally taught me:`, `This is what I've learned from you directly:`])];
+  lines.push(`\n  ${G('Trusted IPs:')} ${know.trustedIps.length ? know.trustedIps.join(', ') : 'none yet'}`);
+  lines.push(`  ${Y('Flagged IPs:')} ${know.suspiciousIps.length ? know.suspiciousIps.join(', ') : 'none yet'}`);
+  lines.push(`\n  ${C('Your notes:')}`);
+  if (!know.notes.length) lines.push(`  (nothing saved yet)`);
+  else know.notes.forEach((n,i) => lines.push(`  ${i+1}. ${n.text}  ${D('('+new Date(n.addedAt).toLocaleDateString()+')')}`));
+  return lines.join('\n');
 }
 
-function handleForget(input, knowledge) {
+function genForget(input, know) {
   const ip = extractIp(input);
   if (ip) {
-    const before = knowledge.trustedIps.length + knowledge.suspiciousIps.length;
-    knowledge.trustedIps    = knowledge.trustedIps.filter(i => i !== ip);
-    knowledge.suspiciousIps = knowledge.suspiciousIps.filter(i => i !== ip);
-    const after = knowledge.trustedIps.length + knowledge.suspiciousIps.length;
-    saveKnowledge(knowledge);
-    return before > after ? `${C.green('Done.')} Removed ${ip} from all my custom lists.` : `I don't have ${ip} in any custom list.`;
+    const before = know.trustedIps.length + know.suspiciousIps.length;
+    know.trustedIps = know.trustedIps.filter(i=>i!==ip);
+    know.suspiciousIps = know.suspiciousIps.filter(i=>i!==ip);
+    saveKnowledge(know);
+    const after = know.trustedIps.length + know.suspiciousIps.length;
+    return before>after ? `Done — removed ${ip} from all my lists.` : `${ip} wasn't in any of my custom lists.`;
   }
-  const numMatch = input.match(/note\s+#?(\d+)/i);
-  if (numMatch) {
-    const idx = parseInt(numMatch[1]) - 1;
-    if (idx >= 0 && idx < knowledge.notes.length) {
-      const removed = knowledge.notes.splice(idx, 1)[0];
-      saveKnowledge(knowledge);
-      return `${C.green('Removed note:')} "${removed.text}"`;
+  const nm = input.match(/note\s+#?(\d+)/i);
+  if (nm) {
+    const idx = parseInt(nm[1])-1;
+    if (idx>=0 && idx<know.notes.length) {
+      const removed = know.notes.splice(idx,1)[0];
+      saveKnowledge(know);
+      return `Removed note ${nm[1]}: "${removed.text}"`;
     }
-    return `Note #${numMatch[1]} not found. Use "show notes" to see them.`;
+    return `I don't have a note #${nm[1]}. Say 'show what you know' to see all notes.`;
   }
-  return `Tell me what to forget — an IP (e.g. "forget 1.2.3.4") or a note number (e.g. "forget note 2").`;
+  return "Tell me what to forget — an IP address, or 'forget note 2' for a specific note.";
 }
 
-function handleDiskInfo() {
-  const dirs = ['/var/log/sbs', path.join(__dirname, 'storage'), path.join(__dirname, 'intel')];
-  let r = `${C.bold('Log & storage disk usage:')}\n`;
+function genDisk() {
   const { execSync } = require('child_process');
+  const dirs = ['/var/log/sbs', path.join(__dirname,'storage'), path.join(__dirname,'intel')];
+  const lines = [pick([`Here's your disk usage for logs and storage:`, `Storage breakdown:`])];
   for (const d of dirs) {
     try {
-      const size = execSync(`du -sh "${d}" 2>/dev/null || echo "N/A"`, { encoding: 'utf8' }).trim().split('\t')[0];
-      r += `  ${d.padEnd(40)} ${C.yellow(size)}\n`;
-    } catch (_) { r += `  ${d} — unable to read\n`; }
+      const sz = execSync(`du -sh "${d}" 2>/dev/null`, {encoding:'utf8'}).trim().split('\t')[0];
+      lines.push(`  ${d.padEnd(40)} ${Y(sz)}`);
+    } catch(_) { lines.push(`  ${d} — can't read (may not exist yet)`); }
   }
-  r += `\n  To manage logs: ${C.dim('sudo bash sbs-disk-manager.sh')}`;
-  return r;
+  lines.push(`\n  To manage logs, rotate archives, or clear old months: ${D('sudo bash sbs-disk-manager.sh')}`);
+  return lines.join('\n');
 }
 
-function handleAnalyze() {
+function genAnalyze() {
   const { execSync } = require('child_process');
   try {
-    execSync(`node "${path.join(__dirname, 'sparrow-brain.js')}" --apply`, { stdio: 'inherit' });
-    return `${C.green('Analysis complete!')} Memory updated and thresholds applied. Ask me for a summary!`;
-  } catch (e) {
-    return `${C.yellow('Analysis ran but may have had issues:')} ${e.message}`;
+    console.log(D('\n  [running analysis cycle...]\n'));
+    execSync(`node "${path.join(__dirname,'sparrow-brain.js')}" --apply`, {stdio:'inherit'});
+    return pick([
+      `Analysis done! I've updated my memory and applied the learned thresholds. Ask me anything.`,
+      `Finished learning from your logs. My knowledge is now up to date. What do you want to know?`,
+    ]);
+  } catch(e) {
+    return `I ran the analysis but hit an issue: ${e.message}`;
   }
 }
 
-function handleHelp() {
-  return `${C.bold('Things you can ask me:')}\n
-  ${C.cyan('INTEL')}
-    "give me a status summary"
-    "who are the top attackers?"
-    "what types of attacks are you seeing?"
-    "when do attacks peak?"
-    "check 1.2.3.4" / "tell me about 1.2.3.4"
+function genHelp() {
+  return `Here's what you can ask me:\n
+  ${C('Understanding threats:')}
+    "give me a status overview"
+    "who's been attacking me?"
+    "what attack methods are they using?"
+    "when are attacks worst?"
+    "check 45.23.11.4"
     "show me recent attacks"
-    "what thresholds did you learn?"
     "how many IPs are banned?"
+    "what thresholds did you learn?"
 
-  ${C.cyan('TEACH ME')}
-    "trust 10.0.0.5"             → whitelist an IP
-    "flag 45.67.8.9 as suspicious" → watch an IP
-    "remember that port 8080 is my dev server"
-    "forget 10.0.0.5"            → remove from lists
-    "forget note 2"              → remove a note
-    "show what you know"         → see all custom rules
+  ${C('Teaching me things:')}
+    "trust 10.0.0.5"                      → whitelist your own IP
+    "flag 45.2.3.4 as suspicious"         → mark IP for close watching
+    "remember that port 8080 is my dev"   → save a note
+    "forget 10.0.0.5" / "forget note 2"  → remove from lists
+    "show what you know"                  → see all custom rules
 
-  ${C.cyan('SYSTEM')}
-    "analyze" / "rescan"         → run a learning cycle
-    "show disk usage"            → check log file sizes
-    "help"                       → this menu`;
+  ${C('System:')}
+    "analyze" / "learn from logs"         → run a training cycle
+    "show disk usage"                     → check log sizes
+    "how do you work?"                    → explain myself
+    "exit" / "quit"                       → close chat`;
 }
 
-// ── Main chat loop ───────────────────────────────────────────────
-function reply(input) {
-  const mem       = loadMemory();
-  const knowledge = loadKnowledge();
-  const intent    = detectIntent(input);
+// ── Main respond function ────────────────────────────────────────
+function respond(input) {
+  const mem   = loadMemory();
+  const know  = loadKnowledge();
+  const intent = classify(input);
+  ctx.lastIntent = intent;
 
-  switch (intent) {
-    case 'STATUS':         return handleStatus(mem, knowledge);
-    case 'TOP_ATTACKERS':  return handleTopAttackers(mem);
-    case 'ATTACK_TYPES':   return handleAttackTypes(mem);
-    case 'PEAK_HOURS':     return handlePeakHours(mem);
-    case 'BAN_COUNT':      return handleBanCount(mem);
-    case 'IP_LOOKUP':      return handleIpLookup(input, mem, knowledge);
-    case 'RECENT_ATTACKS': return handleRecentAttacks();
-    case 'THRESHOLDS':     return handleThresholds(mem);
-    case 'TEACH_TRUST':    return handleTeachTrust(input, knowledge);
-    case 'TEACH_SUSPECT':  return handleTeachSuspect(input, knowledge);
-    case 'TEACH_NOTE':     return handleTeachNote(input, knowledge);
-    case 'SHOW_KNOWLEDGE': return handleShowKnowledge(knowledge);
-    case 'FORGET':         return handleForget(input, knowledge);
-    case 'DISK_INFO':      return handleDiskInfo();
-    case 'ANALYZE':        return handleAnalyze();
-    case 'HELP':           return handleHelp();
-    default:
-      return `I'm not sure what you mean. Try asking about threats, IPs, attack patterns, or type "${C.dim('help')}" to see what I can do.`;
+  switch(intent) {
+    case 'GREET':      return pick(R_GREET);
+    case 'STATUS':     return genStatus(mem, know);
+    case 'ATTACKERS':  return genAttackers(mem);
+    case 'PATTERNS':   return genPatterns(mem);
+    case 'HOURS':      return genHours(mem);
+    case 'BANS':       return `I've logged ${B(mem.bannedIpCount)} ban events and have ${B(Object.keys(mem.knownAttackers).length)} unique attacker IPs in memory across ${mem.totalCycles} analysis cycles.`;
+    case 'LOOKUP':     return genLookup(input, mem, know);
+    case 'RECENT':     return genRecent();
+    case 'THRESHOLDS': return genThresholds(mem);
+    case 'TRUST':      return genTrust(input, know);
+    case 'FLAG':       return genFlag(input, know);
+    case 'NOTE':       return genNote(input, know);
+    case 'KNOWLEDGE':  return genShowKnowledge(know);
+    case 'FORGET':     return genForget(input, know);
+    case 'DISK':       return genDisk();
+    case 'ANALYZE':    return genAnalyze();
+    case 'HELP':       return genHelp();
+    case 'THANKS':     return pick(R_THANKS);
+    case 'HOW_WORK':   return pick(R_HOW_WORK);
+    default:           return pick(R_UNKNOWN);
   }
 }
 
 // ── Boot ─────────────────────────────────────────────────────────
-console.log(C.cyan(`
-╔══════════════════════════════════════════════════════╗
-║      SPARROWX BRAIN — Local Threat Intelligence      ║
-║      No API. No cloud. Pure local learning.          ║
-╚══════════════════════════════════════════════════════╝`));
-console.log(C.dim(`  Type "help" to see what I can do. Type "exit" to quit.\n`));
-
 const mem0 = loadMemory();
-if (mem0.totalEventsProcessed > 0) {
-  console.log(C.green(`  Brain loaded: ${mem0.totalEventsProcessed} events in memory, ${Object.keys(mem0.knownAttackers).length} attackers tracked.\n`));
-} else {
-  console.log(C.yellow(`  No memory yet. Type "analyze" to run a learning cycle first.\n`));
-}
+const greetings = [
+  `Sparrow online. ${mem0.totalEventsProcessed > 0 ? `I've processed ${mem0.totalEventsProcessed} events and I'm tracking ${Object.keys(mem0.knownAttackers).length} attackers.` : `No memory yet — say 'analyze' and I'll learn from your logs.`}`,
+  `Sparrow here. ${mem0.totalEventsProcessed > 0 ? `Memory loaded: ${mem0.totalEventsProcessed} events, ${Object.keys(mem0.knownAttackers).length} known attackers.` : `Fresh start. Tell me to 'analyze' so I can read your logs.`}`,
+];
 
-const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-const PROMPT = C.cyan('you') + C.dim(' → ') ;
-const BRAIN_TAG = C.green('brain') + C.dim(' → ');
+console.log(C(`
+╔══════════════════════════════════════════════════════╗
+║         SPARROWX — Threat Intelligence Brain         ║
+║         Local NLP  ·  No API  ·  Always watching     ║
+╚══════════════════════════════════════════════════════╝`));
+console.log(`  ${G(pick(greetings))}`);
+console.log(D(`  Type naturally. Say 'help' if you get stuck. 'exit' to quit.\n`));
+
+const rl = readline.createInterface({ input:process.stdin, output:process.stdout });
 
 function ask() {
-  rl.question(PROMPT, input => {
-    const trimmed = input.trim();
-    if (!trimmed) { ask(); return; }
-    if (['exit', 'quit', 'bye', 'q'].includes(trimmed.toLowerCase())) {
-      console.log(C.cyan('\n  Sparrow Brain signing off. Stay protected. 🛡️\n'));
-      rl.close();
-      return;
+  rl.question(C('you ') + D('→ '), raw => {
+    const input = raw.trim();
+    if (!input) { ask(); return; }
+    if (['exit','quit','bye','q'].includes(input.toLowerCase())) {
+      console.log(`\n  ${G('Sparrow signing off. Stay protected. 🛡️')}\n`);
+      rl.close(); return;
     }
-    logChat('user', trimmed);
-    const response = reply(trimmed);
-    logChat('brain', response.replace(/\x1b\[[0-9;]*m/g, ''));
-    console.log(`\n${BRAIN_TAG}\n${response.split('\n').map(l => `  ${l}`).join('\n')}\n`);
+    logChat('user', input);
+    const reply = respond(input);
+    const clean = reply.replace(/\x1b\[[0-9;]*m/g,'');
+    logChat('sparrow', clean);
+    console.log(`\n${G('sparrow')} ${D('→')}\n${reply.split('\n').map(l=>`  ${l}`).join('\n')}\n`);
     ask();
   });
 }

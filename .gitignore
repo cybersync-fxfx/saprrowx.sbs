@@ -1,8 +1,32 @@
+# Environment
 .env
+
+# Dependencies
 node_modules/
 frontend/node_modules/
-# frontend/dist/ removed for direct deployment
-server-start.out.txt
-server-start.err.txt
+
+# Build artifacts (kept for direct deployment — uncomment to exclude)
+# frontend/dist/
+
+# Runtime state & storage
 state/
 storage/
+tunnels.json
+
+# PM2 / server logs
+server-start.out.txt
+server-start.err.txt
+*.out.txt
+*.err.txt
+
+# Brain output & intel runtime files
+intel/logs/
+intel/brain/
+intel/*.json
+
+# Temp / one-off scripts (junk)
+*.tmp
+*.bak
+fix.js
+data.json
+WORKSPACE_INDEX.md
