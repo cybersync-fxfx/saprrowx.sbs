@@ -1,13 +1,21 @@
 #!/bin/bash
 set -euo pipefail
 
-STATE_PATH="${SPARROWX_TUNNEL_STATE_PATH:-${SBS_TUNNEL_STATE_PATH:-/opt/sparrowx/tunnels.json}}"
-if [ ! -f "$STATE_PATH" ] && [ -f /opt/detroit-sbs/tunnels.json ]; then
+# Detect installation directory
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+INSTALL_DIR="$SCRIPT_DIR"
+
+STATE_PATH="${SPARROWX_TUNNEL_STATE_PATH:-${SBS_TUNNEL_STATE_PATH:-$INSTALL_DIR/tunnels.json}}"
+if [ ! -f "$STATE_PATH" ] && [ -f /opt/sparrowx/tunnels.json ]; then
+  STATE_PATH=/opt/sparrowx/tunnels.json
+elif [ ! -f "$STATE_PATH" ] && [ -f /opt/detroit-sbs/tunnels.json ]; then
   STATE_PATH=/opt/detroit-sbs/tunnels.json
 fi
 
-MANAGER_PATH="${SPARROWX_TUNNEL_MANAGER:-${SBS_TUNNEL_MANAGER:-/opt/sparrowx/tunnel-manager.sh}}"
-if [ ! -x "$MANAGER_PATH" ] && [ -x /opt/detroit-sbs/tunnel-manager.sh ]; then
+MANAGER_PATH="${SPARROWX_TUNNEL_MANAGER:-${SBS_TUNNEL_MANAGER:-$INSTALL_DIR/tunnel-manager.sh}}"
+if [ ! -x "$MANAGER_PATH" ] && [ -x /opt/sparrowx/tunnel-manager.sh ]; then
+  MANAGER_PATH=/opt/sparrowx/tunnel-manager.sh
+elif [ ! -x "$MANAGER_PATH" ] && [ -x /opt/detroit-sbs/tunnel-manager.sh ]; then
   MANAGER_PATH=/opt/detroit-sbs/tunnel-manager.sh
 fi
 

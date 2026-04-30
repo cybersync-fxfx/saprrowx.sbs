@@ -17,6 +17,10 @@ WHITE="\e[1;37m"
 DIM="\e[0;90m"
 RESET="\e[0m"
 
+# Detect installation directory
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+INSTALL_DIR="$SCRIPT_DIR"
+
 # Auto-detect which nftables table is present
 # Supports Sparrowx and legacy SBS nftables tables.
 detect_nft_table() {
@@ -212,13 +216,15 @@ if [ "$1" = "--expose" ]; then
     exit 1
   fi
 
-  STATE_PATH="/opt/sparrowx/tunnels.json"
-  if [ ! -f "$STATE_PATH" ] && [ -f /opt/detroit-sbs/tunnels.json ]; then
+  STATE_PATH="$INSTALL_DIR/tunnels.json"
+  if [ ! -f "$STATE_PATH" ] && [ -f /opt/sparrowx/tunnels.json ]; then
+    STATE_PATH=/opt/sparrowx/tunnels.json
+  elif [ ! -f "$STATE_PATH" ] && [ -f /opt/detroit-sbs/tunnels.json ]; then
     STATE_PATH=/opt/detroit-sbs/tunnels.json
   fi
   
   if [ ! -f "$STATE_PATH" ]; then
-    echo -e "${RED}[x] Tunnel state file not found.${RESET}"
+    echo -e "${RED}[x] Tunnel state file not found (checked $INSTALL_DIR/tunnels.json).${RESET}"
     exit 1
   fi
 
@@ -238,8 +244,10 @@ if [ "$1" = "--expose" ]; then
 
   echo -e "${YELLOW}[->] Exposing port $PUBLIC_PORT to $CLIENT_IP:$CLIENT_PORT...${RESET}"
   
-  MANAGER_PATH="/opt/sparrowx/tunnel-manager.sh"
-  if [ ! -x "$MANAGER_PATH" ] && [ -x /opt/detroit-sbs/tunnel-manager.sh ]; then
+  MANAGER_PATH="$INSTALL_DIR/tunnel-manager.sh"
+  if [ ! -x "$MANAGER_PATH" ] && [ -x /opt/sparrowx/tunnel-manager.sh ]; then
+    MANAGER_PATH=/opt/sparrowx/tunnel-manager.sh
+  elif [ ! -x "$MANAGER_PATH" ] && [ -x /opt/detroit-sbs/tunnel-manager.sh ]; then
     MANAGER_PATH=/opt/detroit-sbs/tunnel-manager.sh
   fi
   
@@ -271,15 +279,19 @@ if [ "$1" = "--unexpose" ]; then
     exit 1
   fi
 
-  STATE_PATH="/opt/sparrowx/tunnels.json"
-  if [ ! -f "$STATE_PATH" ] && [ -f /opt/detroit-sbs/tunnels.json ]; then
+  STATE_PATH="$INSTALL_DIR/tunnels.json"
+  if [ ! -f "$STATE_PATH" ] && [ -f /opt/sparrowx/tunnels.json ]; then
+    STATE_PATH=/opt/sparrowx/tunnels.json
+  elif [ ! -f "$STATE_PATH" ] && [ -f /opt/detroit-sbs/tunnels.json ]; then
     STATE_PATH=/opt/detroit-sbs/tunnels.json
   fi
 
   echo -e "${YELLOW}[->] Removing port exposure for port $PUBLIC_PORT...${RESET}"
   
-  MANAGER_PATH="/opt/sparrowx/tunnel-manager.sh"
-  if [ ! -x "$MANAGER_PATH" ] && [ -x /opt/detroit-sbs/tunnel-manager.sh ]; then
+  MANAGER_PATH="$INSTALL_DIR/tunnel-manager.sh"
+  if [ ! -x "$MANAGER_PATH" ] && [ -x /opt/sparrowx/tunnel-manager.sh ]; then
+    MANAGER_PATH=/opt/sparrowx/tunnel-manager.sh
+  elif [ ! -x "$MANAGER_PATH" ] && [ -x /opt/detroit-sbs/tunnel-manager.sh ]; then
     MANAGER_PATH=/opt/detroit-sbs/tunnel-manager.sh
   fi
   

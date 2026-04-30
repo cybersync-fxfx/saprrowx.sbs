@@ -12,6 +12,10 @@ RESET='\033[0m'
 echo -e "${BLUE}=================================================================${RESET}"
 echo -e "${BLUE}  SPARROWX INFRASTRUCTURE AUDIT & AUTO-FIX TOOL${RESET}"
 echo -e "${BLUE}=================================================================${RESET}"
+
+# Detect installation directory
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+INSTALL_DIR="$SCRIPT_DIR"
 echo ""
 
 if [ "$EUID" -ne 0 ]; then
@@ -56,7 +60,9 @@ if nft list tables | grep -q "detroit_guard" || nft list tables | grep -q "sparr
 else
   echo -e "  ${RED}[!]${RESET} No explicit sparrowx firewall table found!"
   echo -e "      Reloading default guard policies..."
-  if [ -f /opt/sparrowx/setup-guard.sh ]; then
+  if [ -f "$INSTALL_DIR/setup-guard.sh" ]; then
+    bash "$INSTALL_DIR/setup-guard.sh" || true
+  elif [ -f /opt/sparrowx/setup-guard.sh ]; then
     bash /opt/sparrowx/setup-guard.sh || true
   elif [ -f /opt/detroit-sbs/setup-guard.sh ]; then
     bash /opt/detroit-sbs/setup-guard.sh || true
@@ -66,8 +72,10 @@ echo ""
 
 # 4. Tunnel Health Check
 echo -e "${YELLOW}[4/5] Verifying Active Customer Routing...${RESET}"
-REPAIR_SCRIPT="/opt/sparrowx/repair-tunnels.sh"
-if [ ! -x "$REPAIR_SCRIPT" ] && [ -x /opt/detroit-sbs/repair-tunnels.sh ]; then
+REPAIR_SCRIPT="$INSTALL_DIR/repair-tunnels.sh"
+if [ ! -x "$REPAIR_SCRIPT" ] && [ -x /opt/sparrowx/repair-tunnels.sh ]; then
+  REPAIR_SCRIPT="/opt/sparrowx/repair-tunnels.sh"
+elif [ ! -x "$REPAIR_SCRIPT" ] && [ -x /opt/detroit-sbs/repair-tunnels.sh ]; then
   REPAIR_SCRIPT="/opt/detroit-sbs/repair-tunnels.sh"
 fi
 

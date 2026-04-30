@@ -14,10 +14,13 @@ BOLD='\033[1m'
 RESET='\033[0m'
 
 # -- CONFIG ----------------------------------------------------
+# Detect installation directory
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+
 # Change this to your actual Sparrowx dashboard / CDN URL where the
 # latest agent bundle lives.
 SPARROWX_UPDATE_URL="https://raw.githubusercontent.com/cybersync-fxfx/sbs.detriot/main/agent/sbs-agent.sh"
-INSTALL_DIR="/opt/sbs-agent"
+INSTALL_DIR="${SCRIPT_DIR:-/opt/sbs-agent}"
 AGENT_SCRIPT="$INSTALL_DIR/sbs-agent.sh"
 SERVICE_NAME="sbs-agent"
 BACKUP_DIR="$INSTALL_DIR/backups"

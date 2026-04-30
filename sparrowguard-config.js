@@ -14,9 +14,15 @@ const DEFAULT_POOL_CIDR = envCompat('SPARROWX_TUNNEL_POOL', 'SBS_TUNNEL_POOL', '
 function getTunnelStateDir() {
   if (process.env.SPARROWX_STATE_DIR) return process.env.SPARROWX_STATE_DIR;
   if (process.env.SBS_STATE_DIR) return process.env.SBS_STATE_DIR;
+  
+  // Priority: 
+  // 1. Current directory if tunnels.json exists there
+  // 2. /opt paths for legacy support
+  // 3. Fallback to current directory
+  if (fs.existsSync(path.join(__dirname, 'tunnels.json'))) return __dirname;
   if (fs.existsSync('/opt/sparrowx')) return '/opt/sparrowx';
   if (fs.existsSync('/opt/detroit-sbs')) return '/opt/detroit-sbs';
-  return path.join(__dirname, 'state');
+  return __dirname;
 }
 
 function getTunnelStatePath() {

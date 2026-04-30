@@ -16,9 +16,15 @@ echo -e "${CYAN}          SBS - ADMIN ACCESS PANEL               ${RESET}"
 echo -e "${CYAN}=================================================${RESET}"
 echo ""
 
+# Detect installation directory
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+INSTALL_DIR="$SCRIPT_DIR"
+
 # Load environment variables from .env
 if [ -f .env ]; then
   export $(grep -v '^#' .env | xargs)
+elif [ -f "$INSTALL_DIR/.env" ]; then
+  export $(grep -v '^#' "$INSTALL_DIR/.env" | xargs)
 elif [ -f /opt/sbs/.env ]; then
   export $(grep -v '^#' /opt/sbs/.env | xargs)
 fi

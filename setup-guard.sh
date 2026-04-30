@@ -6,6 +6,10 @@ if [ "$EUID" -ne 0 ]; then
   exit 1
 fi
 
+# Detect installation directory
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+INSTALL_DIR="$SCRIPT_DIR"
+
 echo "[1/5] Enabling IP Forwarding and WireGuard dependencies..."
 apt-get update -qq && apt-get install -y wireguard wireguard-tools procps < /dev/null
 
@@ -24,21 +28,18 @@ modprobe wireguard || true
 modprobe nf_conntrack || true
 
 echo "[2/5] Setting up Tunnel Manager..."
-mkdir -p /opt/sparrowx
-cp tunnel-manager.sh /opt/sparrowx/ 2>/dev/null || echo "Warning: Please ensure tunnel-manager.sh is in /opt/sparrowx/"
-cp restore-tunnels.sh /opt/sparrowx/ 2>/dev/null || echo "Warning: Please ensure restore-tunnels.sh is in /opt/sparrowx/"
-chmod +x /opt/sparrowx/tunnel-manager.sh
-chmod +x /opt/sparrowx/restore-tunnels.sh
-if [ ! -e /opt/detroit-sbs ]; then
-  ln -s /opt/sparrowx /opt/detroit-sbs
+mkdir -p "$INSTALL_DIR"
+# Only copy if source exists and is different from destination
+if [ "$SCRIPT_DIR" != "$INSTALL_DIR" ]; then
+  cp tunnel-manager.sh "$INSTALL_DIR/" 2>/dev/null || true
+  cp restore-tunnels.sh "$INSTALL_DIR/" 2>/dev/null || true
 fi
+chmod +x "$INSTALL_DIR/tunnel-manager.sh" 2>/dev/null || true
+chmod +x "$INSTALL_DIR/restore-tunnels.sh" 2>/dev/null || true
 
 echo "[3/5] Configuring sudoers for Node.js..."
-if ! grep -q "/opt/sparrowx/tunnel-manager.sh" /etc/sudoers; then
-  echo "root ALL=(ALL) NOPASSWD: /opt/sparrowx/tunnel-manager.sh" >> /etc/sudoers
-fi
-if ! grep -q "/opt/detroit-sbs/tunnel-manager.sh" /etc/sudoers; then
-  echo "root ALL=(ALL) NOPASSWD: /opt/detroit-sbs/tunnel-manager.sh" >> /etc/sudoers
+if ! grep -q "$INSTALL_DIR/tunnel-manager.sh" /etc/sudoers; then
+  echo "root ALL=(ALL) NOPASSWD: $INSTALL_DIR/tunnel-manager.sh" >> /etc/sudoers
 fi
 
 echo "[4/5] Configuring nftables with auto-ban..."
@@ -147,33 +148,33 @@ echo "[ok] nftables loaded with auto-ban rules."
 
 echo "[5/5] Setting up attack log writer (sparrowx-ban-logger)..."
 
-cat << 'LOGGEREOF' > /opt/sparrowx/ban-logger.sh
+cat << LOGGEREOF > "$INSTALL_DIR/ban-logger.sh"
 #!/bin/bash
 # Watches kernel logs for Sparrowx auto-ban events and writes them to
 # /var/log/sbs/attacks.log so the Sparrowx dashboard can display them.
 touch /var/log/sbs/attacks.log
 
 journalctl -kf --no-hostname 2>/dev/null | grep --line-buffered '\[SBS-BAN-' | while IFS= read -r line; do
-  SRC=$(echo "$line" | grep -oP 'SRC=\K[\d.]+')
-  PROTO=$(echo "$line" | grep -oP '\[SBS-BAN-\K[A-Z]+(?=\])')
-  SCOPE=$(echo "$line" | grep -q 'FWD' && echo "FORWARDED" || echo "LOCAL")
-  TS=$(date '+%Y-%m-%d %H:%M:%S')
-  if [ -n "$SRC" ]; then
-    echo "[$TS] AUTO-BAN ${PROTO:-UNKNOWN} flood from ${SRC} (${SCOPE}) - blacklisted for 24h" >> /var/log/sbs/attacks.log
+  SRC=\$(echo "\$line" | grep -oP 'SRC=\K[\d.]+')
+  PROTO=\$(echo "\$line" | grep -oP '\[SBS-BAN-\K[A-Z]+(?=\])')
+  SCOPE=\$(echo "\$line" | grep -q 'FWD' && echo "FORWARDED" || echo "LOCAL")
+  TS=\$(date '+%Y-%m-%d %H:%M:%S')
+  if [ -n "\$SRC" ]; then
+    echo "[\$TS] AUTO-BAN \${PROTO:-UNKNOWN} flood from \${SRC} (\${SCOPE}) - blacklisted for 24h" >> /var/log/sbs/attacks.log
   fi
 done
 LOGGEREOF
 
-chmod +x /opt/sparrowx/ban-logger.sh
+chmod +x "$INSTALL_DIR/ban-logger.sh"
 
-cat << 'SVCEOF' > /etc/systemd/system/sparrowx-ban-logger.service
+cat << SVCEOF > /etc/systemd/system/sparrowx-ban-logger.service
 [Unit]
 Description=Sparrowx Auto-Ban Event Logger
 After=network.target nftables.service
 
 [Service]
 Type=simple
-ExecStart=/opt/sparrowx/ban-logger.sh
+ExecStart=$INSTALL_DIR/ban-logger.sh
 Restart=always
 RestartSec=5
 
@@ -186,7 +187,7 @@ systemctl enable sparrowx-ban-logger
 systemctl restart sparrowx-ban-logger
 systemctl disable --now sbs-ban-logger 2>/dev/null || true
 
-cat << 'RESTORESVCEOF' > /etc/systemd/system/sparrowx-tunnel-restore.service
+cat << RESTORESVCEOF > /etc/systemd/system/sparrowx-tunnel-restore.service
 [Unit]
 Description=Sparrowx Tunnel Restore
 After=network-online.target
@@ -194,7 +195,7 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-ExecStart=/opt/sparrowx/restore-tunnels.sh
+ExecStart=$INSTALL_DIR/restore-tunnels.sh
 RemainAfterExit=yes
 
 [Install]

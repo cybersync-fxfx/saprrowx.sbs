@@ -1662,7 +1662,7 @@ function sendStats() {
       "ss -ant | wc -l; " +
       "ss -ant | grep ESTAB | wc -l; " +
       "ss -ant | grep SYN-RECV | wc -l; " +
-      "NFT_TABLE=$(nft list table inet detroit_guard >/dev/null 2>&1 && echo 'inet detroit_guard' || (nft list table inet sbs_filter >/dev/null 2>&1 && echo 'inet sbs_filter' || echo 'inet sparrowx_guard')); " +
+      "NFT_TABLE=$(nft list table inet sparrowx_shield >/dev/null 2>&1 && echo 'inet sparrowx_shield' || (nft list table inet detroit_guard >/dev/null 2>&1 && echo 'inet detroit_guard' || (nft list table inet sbs_filter >/dev/null 2>&1 && echo 'inet sbs_filter' || echo 'inet sparrowx_guard'))); " +
       "nft list set $NFT_TABLE blacklist 2>/dev/null | grep -oE '([0-9]{1,3}\\.){3}[0-9]{1,3}' | wc -l; " +
       "free | grep Mem | awk '{print $3/$2 * 100}'; " +
       "cat /proc/uptime | awk '{print $1}'; " +
@@ -1825,36 +1825,94 @@ mkdir -p /var/log/sbs
 touch /var/log/sbs/attacks.log
 touch /var/log/sbs/agent.log
 
-cat << 'NFT_EOF' > /etc/nftables.conf
+# ── ORIGIN SHIELD ─────────────────────────────────────────────────────────────
+# Write strong firewall — default DROP policy. Only Guard server can reach this
+# machine inbound. Web services must be accessed through the WireGuard tunnel.
+#
+# EMERGENCY UNLOCK (if locked out, run as root on the server):
+#   nft flush ruleset
+# ──────────────────────────────────────────────────────────────────────────────
+GUARD_PUB_IP="${tunnelConfig.guardPublicIp}"
+GUARD_WG_PORT="${tunnelConfig.listenPort || 51820}"
+
+cat > /etc/nftables.conf << NFTEOF
 #!/usr/sbin/nft -f
 flush ruleset
 
-table inet detroit_guard {
+# =============================================================================
+# SparrowX Origin Shield — Agent Firewall
+# Default: DROP all inbound. Only the Guard server is allowed.
+# Web services must bind to the WireGuard tunnel IP (10.200.x.x).
+# =============================================================================
+
+table inet sparrowx_shield {
+
+  # Persistent ban list — 24h auto-ban + manual bans from dashboard
   set blacklist {
     type ipv4_addr
-    flags timeout
+    flags dynamic,timeout
+    timeout 24h
+  }
+
+  # SYN flood meter — per-IP rate tracking
+  set syn_meter {
+    type ipv4_addr
+    flags dynamic,timeout
+    timeout 10s
   }
 
   chain input {
-    type filter hook input priority 0; policy accept;
-    ct state invalid drop
-    ct state established,related accept
+    type filter hook input priority 0; policy drop;
+
+    # Loopback always allowed
     iif lo accept
+
+    # Already-established connections pass through
+    ct state established,related accept
+
+    # Drop malformed packets
+    ct state invalid drop
+
+    # Enforce ban list
     ip saddr @blacklist drop
-    
-    tcp flags syn limit rate 1000/second accept
-    tcp flags syn drop
-    
-    meta l4proto udp limit rate 10000/second accept
-    meta l4proto udp drop
-    
-    ip protocol icmp limit rate 10/second accept
-    ip protocol icmp drop
+
+    # ── ORIGIN SHIELD ────────────────────────────────────────────────────────
+    # WireGuard tunnel — ONLY from the SparrowX Guard server
+    ip saddr $GUARD_PUB_IP udp dport $GUARD_WG_PORT accept
+
+    # All traffic from inside the SparrowX WireGuard tunnel pool
+    ip saddr 10.200.0.0/16 accept
+
+    # SSH — Guard server IP + private/CGN subnets only
+    ip saddr $GUARD_PUB_IP tcp dport 22 accept
+    ip saddr { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 100.64.0.0/10 } tcp dport 22 accept
+    # ─────────────────────────────────────────────────────────────────────────
+
+    # Auto-ban SYN flood attempts (defense in depth)
+    tcp flags syn add @syn_meter { ip saddr limit rate over 50/second } add @blacklist { ip saddr timeout 24h } log prefix "[SPX-SHIELD-SYN] " drop
+
+    # ICMP: rate-limited pings for diagnostics only
+    ip protocol icmp limit rate 5/second accept
+  }
+
+  # No packet forwarding on client agents
+  chain forward {
+    type filter hook forward priority 0; policy drop;
+  }
+
+  # All outbound traffic allowed (agent connects OUT to panel + Guard)
+  chain output {
+    type filter hook output priority 0; policy accept;
   }
 }
-NFT_EOF
+NFTEOF
+
 systemctl enable nftables
 systemctl restart nftables
+echo "[ok] Origin Shield firewall active. Direct public internet access is blocked."
+echo "     Only the SparrowX Guard ($GUARD_PUB_IP) can reach this server inbound."
+echo "     Bind web services to the WireGuard tunnel IP to serve traffic through the Guard."
+
 
 cat << 'AGENT_SVC_EOF' > /etc/systemd/system/sbs-agent.service
 [Unit]
@@ -2479,7 +2537,7 @@ function broadcastGlobalBan(ip) {
   Object.keys(db.agents).forEach(agentId => {
     queueAgentCommand(
       agentId,
-      `NFT_TABLE=$(nft list table inet detroit_guard >/dev/null 2>&1 && echo detroit_guard || (nft list table inet sbs_filter >/dev/null 2>&1 && echo sbs_filter || echo sparrowx_guard)); nft add element inet $NFT_TABLE blacklist '{ ${ip} }' 2>/dev/null || true`,
+      `NFT_TABLE=$(nft list table inet sparrowx_shield >/dev/null 2>&1 && echo sparrowx_shield || (nft list table inet detroit_guard >/dev/null 2>&1 && echo detroit_guard || (nft list table inet sbs_filter >/dev/null 2>&1 && echo sbs_filter || echo sparrowx_guard))); nft add element inet $NFT_TABLE blacklist '{ ${ip} }' 2>/dev/null || true`,
       { kind: 'firewall:ban', summary: `Block ${ip} on client firewall` }
     );
   });
@@ -2490,7 +2548,7 @@ function broadcastGlobalUnban(ip) {
   Object.keys(db.agents).forEach(agentId => {
     queueAgentCommand(
       agentId,
-      `NFT_TABLE=$(nft list table inet detroit_guard >/dev/null 2>&1 && echo detroit_guard || (nft list table inet sbs_filter >/dev/null 2>&1 && echo sbs_filter || echo sparrowx_guard)); nft delete element inet $NFT_TABLE blacklist '{ ${ip} }' 2>/dev/null || true`,
+      `NFT_TABLE=$(nft list table inet sparrowx_shield >/dev/null 2>&1 && echo sparrowx_shield || (nft list table inet detroit_guard >/dev/null 2>&1 && echo detroit_guard || (nft list table inet sbs_filter >/dev/null 2>&1 && echo sbs_filter || echo sparrowx_guard))); nft delete element inet $NFT_TABLE blacklist '{ ${ip} }' 2>/dev/null || true`,
       { kind: 'firewall:unban', summary: `Unblock ${ip} on client firewall` }
     );
   });

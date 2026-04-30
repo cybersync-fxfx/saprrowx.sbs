@@ -13,6 +13,10 @@ BLUE='\033[0;34m'
 YELLOW='\033[1;33m'
 RESET='\033[0m'
 
+# Detect installation directory
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+INSTALL_DIR="$SCRIPT_DIR"
+
 echo -e "${BLUE}[1/6] Hardening Kernel (sysctl)...${RESET}"
 cat << EOF > /etc/sysctl.d/99-sparrowx-hardening.conf
 # Anti-spoofing
@@ -39,10 +43,10 @@ EOF
 sysctl -p /etc/sysctl.d/99-sparrowx-hardening.conf
 
 echo -e "${BLUE}[2/6] Downloading Community Threat Lists...${RESET}"
-mkdir -p /opt/sparrowx/threat-lists
-curl -s https://rules.emergingthreats.net/fwrules/emerging-Block-IPs.txt | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' > /opt/sparrowx/threat-lists/emerging.txt
-curl -s https://www.spamhaus.org/drop/drop.txt | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' > /opt/sparrowx/threat-lists/spamhaus.txt
-curl -s https://iplists.firehol.org/files/firehol_level1.netset | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' > /opt/sparrowx/threat-lists/firehol.txt
+mkdir -p "$INSTALL_DIR/threat-lists"
+curl -s https://rules.emergingthreats.net/fwrules/emerging-Block-IPs.txt | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' > "$INSTALL_DIR/threat-lists/emerging.txt"
+curl -s https://www.spamhaus.org/drop/drop.txt | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' > "$INSTALL_DIR/threat-lists/spamhaus.txt"
+curl -s https://iplists.firehol.org/files/firehol_level1.netset | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' > "$INSTALL_DIR/threat-lists/firehol.txt"
 
 echo -e "${BLUE}[3/6] Applying Nftables Advanced Ruleset...${RESET}"
 cat << 'NFTEOF' > /etc/nftables.conf
@@ -105,19 +109,19 @@ NFTEOF
 
 # Load the threat lists into nftables
 systemctl restart nftables
-cat /opt/sparrowx/threat-lists/*.txt | sort -u | while read ip; do
+cat "$INSTALL_DIR/threat-lists/"*.txt | sort -u | while read ip; do
   nft add element inet detroit_guard threat_intel "{ $ip }" 2>/dev/null
 done
 
 echo -e "${BLUE}[4/6] Setting up Automatic Threat List Sync (Cron)...${RESET}"
-cat << 'CRONEOF' > /etc/cron.daily/sparrowx-sync-threats
+cat << CRONEOF > /etc/cron.daily/sparrowx-sync-threats
 #!/bin/bash
-curl -s https://rules.emergingthreats.net/fwrules/emerging-Block-IPs.txt | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' > /opt/sparrowx/threat-lists/emerging.txt
-curl -s https://www.spamhaus.org/drop/drop.txt | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' > /opt/sparrowx/threat-lists/spamhaus.txt
+curl -s https://rules.emergingthreats.net/fwrules/emerging-Block-IPs.txt | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' > "$INSTALL_DIR/threat-lists/emerging.txt"
+curl -s https://www.spamhaus.org/drop/drop.txt | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' > "$INSTALL_DIR/threat-lists/spamhaus.txt"
 # Flush and reload set
 nft flush set inet detroit_guard threat_intel
-cat /opt/sparrowx/threat-lists/*.txt | sort -u | while read ip; do
-  nft add element inet detroit_guard threat_intel "{ $ip }" 2>/dev/null
+cat "$INSTALL_DIR/threat-lists/"*.txt | sort -u | while read ip; do
+  nft add element inet detroit_guard threat_intel "{ \$ip }" 2>/dev/null
 done
 CRONEOF
 chmod +x /etc/cron.daily/sparrowx-sync-threats
