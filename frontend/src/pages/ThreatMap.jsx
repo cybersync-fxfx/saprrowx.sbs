@@ -1,15 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { ComposableMap, Geographies, Geography, Marker, Line } from 'react-simple-maps';
-import { useTelemetry } from '../context/TelemetryContext';
 
 const geoUrl = "https://unpkg.com/world-atlas@2.0.2/countries-110m.json";
 
 export default function ThreatMap({ token }) {
-  const { trafficEvents, stats } = useTelemetry();
   const [data, setData] = useState({ liveScores: [], stats: { scannedToday: 0, blockedToday: 0 } });
   const [hoveredMarker, setHoveredMarker] = useState(null);
   const [terminalLogs, setTerminalLogs] = useState([]);
   const [selectedIp, setSelectedIp] = useState(null);
+  const [lookupInput, setLookupInput] = useState('');
   const [lookupData, setLookupData] = useState(null);
   const [lookupLoading, setLookupLoading] = useState(false);
   const [lookupError, setLookupError] = useState('');
@@ -36,13 +35,15 @@ export default function ThreatMap({ token }) {
   }, [token]);
 
   const inspectIp = (ip) => {
-    if (!ip || !token) return;
-    setSelectedIp(ip);
+    const target = String(ip || '').trim();
+    if (!target || !token) return;
+    setSelectedIp(target);
+    setLookupInput(target);
     setLookupData(null);
     setLookupLoading(true);
     setLookupError('');
 
-    fetch(`/api/radar/ip/${encodeURIComponent(ip)}`, { headers: { Authorization: `Bearer ${token}` } })
+    fetch(`/api/radar/ip/${encodeURIComponent(target)}`, { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.ok ? r.json() : r.json().then(err => Promise.reject(err)))
       .then(d => setLookupData(d))
       .catch(err => {
@@ -308,6 +309,51 @@ export default function ThreatMap({ token }) {
             borderBottom: '1px solid rgba(255,255,255,0.05)',
             background: selectedIp ? 'rgba(0,216,255,0.025)' : 'rgba(255,255,255,0.01)'
           }}>
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                inspectIp(lookupInput);
+              }}
+              style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}
+            >
+              <input
+                value={lookupInput}
+                onChange={(event) => setLookupInput(event.target.value)}
+                placeholder="Enter IP to inspect"
+                style={{
+                  flex: 1,
+                  minWidth: 0,
+                  background: '#050609',
+                  border: '1px solid rgba(0,216,255,0.2)',
+                  borderRadius: '6px',
+                  color: '#fff',
+                  fontFamily: 'monospace',
+                  fontSize: '0.78rem',
+                  padding: '9px 10px',
+                  outline: 'none'
+                }}
+              />
+              <button
+                type="submit"
+                disabled={lookupLoading || !lookupInput.trim()}
+                style={{
+                  background: lookupInput.trim() ? 'rgba(0,216,255,0.12)' : 'rgba(255,255,255,0.04)',
+                  border: '1px solid rgba(0,216,255,0.35)',
+                  borderRadius: '6px',
+                  color: lookupInput.trim() ? '#00d8ff' : '#666',
+                  cursor: lookupInput.trim() ? 'pointer' : 'default',
+                  fontFamily: 'monospace',
+                  fontSize: '0.72rem',
+                  fontWeight: 800,
+                  letterSpacing: '0.5px',
+                  padding: '0 12px',
+                  textTransform: 'uppercase'
+                }}
+              >
+                Lookup
+              </button>
+            </form>
+
             {!selectedIp && (
               <div style={{ color: '#666', fontSize: '0.78rem', lineHeight: 1.5 }}>
                 Select any attack marker or ledger row.
