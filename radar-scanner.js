@@ -35,9 +35,18 @@ const DEFAULT_CONFIG = {
   banCooldownMs: Number(envCompat('SPARROWX_RADAR_BAN_COOLDOWN_MS', 'SBS_RADAR_BAN_COOLDOWN_MS', 30 * 60 * 1000)),
   logCooldownMs: Number(envCompat('SPARROWX_RADAR_LOG_COOLDOWN_MS', 'SBS_RADAR_LOG_COOLDOWN_MS', 5 * 60 * 1000)),
   ignoredLocalPorts: parseIntegerList(envCompat('SPARROWX_RADAR_IGNORE_PORTS', 'SBS_RADAR_IGNORE_PORTS', '22,80,443,3001')),
-  whitelistCidrs: normalizeCidrs(envCompat('SPARROWX_RADAR_WHITELIST_CIDRS', 'SBS_RADAR_WHITELIST_CIDRS', '127.0.0.0/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,169.254.0.0/16,35.235.240.0/20,173.245.48.0/20,103.21.244.0/22,103.22.200.0/22,103.31.4.0/22,141.101.64.0/18,108.162.192.0/18,190.93.240.0/20,188.114.96.0/20,197.234.240.0/22,198.41.128.0/17,162.158.0.0/15,104.16.0.0/13,104.24.0.0/14,172.64.0.0/13,131.0.72.0/22')),
+  whitelistCidrs: normalizeCidrs(envCompat('SPARROWX_RADAR_WHITELIST_CIDRS', 'SBS_RADAR_WHITELIST_CIDRS', '')),
   trustedProxyCidrs: normalizeCidrs(envCompat('SPARROWX_RADAR_TRUSTED_PROXY_CIDRS', 'SBS_RADAR_TRUSTED_PROXY_CIDRS', '')),
 };
+
+const SYSTEM_WHITELIST = [
+  '127.0.0.0/8', '10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16', '169.254.0.0/16',
+  // Cloudflare IPv4
+  '173.245.48.0/20', '103.21.244.0/22', '103.22.200.0/22', '103.31.4.0/22',
+  '141.101.64.0/18', '108.162.192.0/18', '190.93.240.0/20', '188.114.96.0/20',
+  '197.234.240.0/22', '198.41.128.0/17', '162.158.0.0/15', '104.16.0.0/13',
+  '104.24.0.0/14', '172.64.0.0/13', '131.0.72.0/22'
+];
 
 const INTEL_DIR = path.join(__dirname, 'intel');
 
@@ -144,36 +153,21 @@ class RadarScanner {
 
     this.configPath = path.join(getTunnelStateDir(), 'radar-config.json');
     this.config = this.loadConfig();
+    this.systemWhitelist = new Set(SYSTEM_WHITELIST);
 
-    // Dynamically whitelist critical gateway assets (Supabase, Cloudflare, User IP)
-    try {
-      const criticalCidrs = [
-        '49.43.249.32/32', // User Requested Whitelist IP
-        '173.245.48.0/20', '103.21.244.0/22', '103.22.200.0/22',
-        '103.31.4.0/22', '141.101.64.0/18', '108.162.192.0/18',
-        '190.93.240.0/20', '188.114.96.0/20', '197.234.240.0/22',
-        '198.41.128.0/17', '162.158.0.0/15', '104.16.0.0/13',
-        '104.24.0.0/14', '172.64.0.0/13', '131.0.72.0/22' // Cloudflare
-      ];
-      
-      if (!Array.isArray(this.config.whitelistCidrs)) {
-        this.config.whitelistCidrs = [];
-      }
-      
-      for (const cidr of criticalCidrs) {
-        if (!this.config.whitelistCidrs.includes(cidr)) {
-          this.config.whitelistCidrs.push(cidr);
-        }
-      }
-
-      const dns = require('dns');
-      const url = new URL(process.env.SUPABASE_URL || 'https://supabase.co');
-      dns.lookup(url.hostname, (err, address) => {
-        if (!err && address && !this.config.whitelistCidrs.includes(`${address}/32`)) {
-          this.config.whitelistCidrs.push(`${address}/32`);
-        }
-      });
-    } catch (_) {}
+    // Bootstrap Supabase IP resolution
+    const supabaseUrl = process.env.SUPABASE_URL;
+    if (supabaseUrl) {
+      try {
+        const url = new URL(supabaseUrl);
+        require('dns').lookup(url.hostname, (err, address) => {
+          if (!err && address) {
+            console.log(`[Radar] Whitelisting Supabase IP: ${address}`);
+            this.systemWhitelist.add(`${address}/32`);
+          }
+        });
+      } catch (e) {}
+    }
   }
 
   loadConfig() {
@@ -244,19 +238,26 @@ class RadarScanner {
       base.udpWarn = Math.floor(base.udpWarn * 0.5);
       base.udpBan = Math.floor(base.udpBan * 0.5);
     } else if (base.mode === 'shield') {
-      base.threshold = Math.floor(base.threshold * 0.33);
-      base.watchThreshold = Math.floor(base.watchThreshold * 0.2);
-      base.connWarn = Math.floor(base.connWarn * 0.2);
-      base.connBan = Math.floor(base.connBan * 0.2);
-      base.synWarn = Math.floor(base.synWarn * 0.2);
-      base.synBan = Math.floor(base.synBan * 0.2);
-      base.udpWarn = Math.floor(base.udpWarn * 0.2);
-      base.udpBan = Math.floor(base.udpBan * 0.2);
+      base.threshold = Math.max(35, Math.floor(base.threshold * 0.45));
+      base.watchThreshold = Math.max(15, Math.floor(base.watchThreshold * 0.3));
+      base.connWarn = Math.max(15, Math.floor(base.connWarn * 0.3));
+      base.connBan = Math.max(40, Math.floor(base.connBan * 0.3));
+      base.synWarn = Math.max(10, Math.floor(base.synWarn * 0.3));
+      base.synBan = Math.max(25, Math.floor(base.synBan * 0.3));
+      base.udpWarn = Math.max(30, Math.floor(base.udpWarn * 0.3));
+      base.udpBan = Math.max(80, Math.floor(base.udpBan * 0.3));
     }
     return base;
   }
 
   updateConfig(patch = {}) {
+    // If an operator IP is provided, add it to system whitelist permanently for this session
+    if (patch.operatorIp) {
+      console.log(`[Radar] Whitelisting operator IP: ${patch.operatorIp}`);
+      this.systemWhitelist.add(`${patch.operatorIp}/32`);
+      delete patch.operatorIp;
+    }
+
     this.config = this.normalizeConfig({ ...this.config, ...patch });
     this.saveConfig();
     if (this.timer) {
@@ -337,6 +338,7 @@ class RadarScanner {
     if (!ip || ip === '127.0.0.1' || ip === '0.0.0.0') return true;
 
     const whitelist = new Set([
+      ...this.systemWhitelist,
       ...(this.config.whitelistCidrs || []),
       ...(this.config.trustedProxyCidrs || []),
     ]);
@@ -344,7 +346,9 @@ class RadarScanner {
     if (process.env.GUARD_PUBLIC_IP) whitelist.add(`${process.env.GUARD_PUBLIC_IP}/32`);
 
     for (const tunnel of listTunnelConfigs()) {
-      if (tunnel?.clientPublicIp) whitelist.add(`${tunnel.clientPublicIp}/32`);
+      if (tunnel?.clientPublicIp && tunnel.clientPublicIp !== 'auto') {
+        whitelist.add(`${tunnel.clientPublicIp}/32`);
+      }
     }
 
     if (typeof this.options.listAgentIps === 'function') {

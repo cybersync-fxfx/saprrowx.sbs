@@ -2907,7 +2907,8 @@ app.post('/api/radar/mode', authMiddleware, adminMiddleware, (req, res) => {
   }
 
   try {
-    const next = radar.updateConfig(selected.patch);
+    const operatorIp = normalizeIp(req.headers['x-forwarded-for'] || req.socket.remoteAddress);
+    const next = radar.updateConfig({ ...selected.patch, operatorIp });
     appendAttackLog(`[radar-mode] switched to ${selected.mode} by ${req.user.username || req.user.email || req.user.id}`);
     broadcastToAll({
       type: 'radar_mode_changed',
