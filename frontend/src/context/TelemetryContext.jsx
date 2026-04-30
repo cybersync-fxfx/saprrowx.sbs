@@ -73,6 +73,11 @@ export function TelemetryProvider({ token, children }) {
   });
 
   const [notifications, setNotifications] = useState([]);
+  const [viewMode, setViewMode] = useState(localStorage.getItem('sparrowx_view_mode') || 'global'); // 'global' or 'agent'
+
+  useEffect(() => {
+    localStorage.setItem('sparrowx_view_mode', viewMode);
+  }, [viewMode]);
 
   // -- Persist to localStorage whenever key state changes --------------------
   const statsRef      = useRef(stats);
@@ -511,6 +516,8 @@ export function TelemetryProvider({ token, children }) {
     refreshGuardBlocklistSummary,
     notifications,
     setNotifications,
+    viewMode,
+    setViewMode,
     isConnected: agentStatus === 'CONNECTED',
     commandReady: agentStatus === 'CONNECTED' && wsState === 'open',
   };

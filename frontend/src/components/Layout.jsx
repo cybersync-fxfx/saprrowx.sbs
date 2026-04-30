@@ -47,9 +47,30 @@ export default function Layout({ user, setToken }) {
         </div>
 
         <div className="topbar-meta">
+          {user?.role === 'admin' && (
+            <div className="view-switcher">
+              <button 
+                className={`view-button ${viewMode === 'global' ? 'active' : ''}`}
+                onClick={() => setViewMode('global')}
+                title="Global Guard Infrastructure View"
+              >
+                <Globe size={14} />
+                <span>GUARD</span>
+              </button>
+              <button 
+                className={`view-button ${viewMode === 'agent' ? 'active' : ''}`}
+                onClick={() => setViewMode('agent')}
+                title="Local VPS Agent View"
+              >
+                <ServerCog size={14} />
+                <span>LOCAL</span>
+              </button>
+            </div>
+          )}
+
           <div className={`status-pill ${isConnected || user?.role === 'admin' ? 'connected' : 'disconnected'}`}>
             <RadioTower size={14} />
-            {user?.role === 'admin' ? 'GUARD ONLINE' : (agentStatus === 'CONNECTED' ? 'CONNECTED' : 'NO AGENT')}
+            {user?.role === 'admin' ? (viewMode === 'global' ? 'GUARD ONLINE' : 'LOCAL MONITORING') : (agentStatus === 'CONNECTED' ? 'CONNECTED' : 'NO AGENT')}
           </div>
           <div className="meta-chip">WS {wsState}</div>
           <div className="topbar-time">{time}</div>

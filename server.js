@@ -3017,6 +3017,8 @@ app.get('/api/radar/stats', authMiddleware, async (req, res) => {
     const guardBlocklist = getGuardBlocklistSummary();
 
     const isAdmin = req.user.role === 'admin';
+    const scope = req.query.scope || (isAdmin ? 'global' : 'agent');
+    
     const userAgent = Object.values(db.agents).find(a => a.userId === req.user.id);
     const agentId = userAgent ? userAgent.agentId : null;
 
@@ -3024,11 +3026,14 @@ app.get('/api/radar/stats', authMiddleware, async (req, res) => {
       .from('threat_radar')
       .select('*');
     
-    // Admins see EVERYTHING, regular users only see their own agent's logs
-    if (!isAdmin && agentId) {
+    // Admins see EVERYTHING if scope is global, otherwise they see their own agent if specified.
+    // Regular users always see only their own agent.
+    const effectiveScope = isAdmin ? scope : 'agent';
+    
+    if (effectiveScope === 'agent' && agentId) {
       query = query.eq('target_agent_id', agentId);
-    } else if (!isAdmin && !agentId) {
-      // Non-admin without an agent sees nothing
+    } else if (effectiveScope === 'agent' && !agentId) {
+      // Non-admin or scoped-admin without an agent sees nothing
       return res.json({
         totalBanned: Number(db.sbsBanTotal || 0),
         scannedToday: 0,
@@ -3048,7 +3053,7 @@ app.get('/api/radar/stats', authMiddleware, async (req, res) => {
       .from('threat_radar')
       .select('*', { count: 'exact', head: true })
       .gte('detected_at', since);
-    if (!isAdmin && agentId) scannedQuery.eq('target_agent_id', agentId);
+    if (effectiveScope === 'agent' && agentId) scannedQuery.eq('target_agent_id', agentId);
     const { count: scannedToday, error: scannedError } = await scannedQuery;
     if (scannedError) throw scannedError;
 
@@ -3057,13 +3062,13 @@ app.get('/api/radar/stats', authMiddleware, async (req, res) => {
       .select('*', { count: 'exact', head: true })
       .eq('action', 'banned')
       .gte('detected_at', since);
-    if (!isAdmin && agentId) blockedQuery.eq('target_agent_id', agentId);
+    if (effectiveScope === 'agent' && agentId) blockedQuery.eq('target_agent_id', agentId);
     const { count: blockedToday, error: blockedError } = await blockedQuery;
     if (blockedError) throw blockedError;
 
-    // Filter liveScores by agent (unless admin)
+    // Filter liveScores by agent (unless admin in global scope)
     let liveScores = radar ? radar.getLiveScores() : [];
-    if (!isAdmin && agentId) {
+    if (effectiveScope === 'agent' && agentId) {
       // Find IPs associated with this agent
       const tunnels = listTunnelConfigs();
       const agentTunnels = tunnels.filter(t => t.agentId === agentId);
