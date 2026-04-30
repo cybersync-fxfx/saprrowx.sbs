@@ -98,15 +98,61 @@ update_status() {
   echo ""
 }
 
+reset_password() {
+  local username=$1
+  
+  # 1. Fetch the user ID from user_profiles
+  USER_DATA=$(curl -s -X GET "${SUPABASE_URL}/rest/v1/user_profiles?username=eq.${username}&select=id" \
+    -H "apikey: ${SUPABASE_KEY}" \
+    -H "Authorization: Bearer ${SUPABASE_KEY}")
+  
+  USER_ID=$(echo "$USER_DATA" | node -e "
+    const fs = require('fs');
+    const data = JSON.parse(fs.readFileSync(0, 'utf-8'));
+    console.log(data?.[0]?.id || '');
+  ")
+
+  if [ -z "$USER_ID" ]; then
+    echo -e "${RED}[x] Error: User '${username}' not found or has no ID.${RESET}"
+    return
+  fi
+
+  echo -e "${YELLOW}[->] Resetting password for ${username} (ID: ${USER_ID})...${RESET}"
+  read -s -p "Enter new password: " PASS
+  echo ""
+  
+  if [ -z "$PASS" ]; then
+    echo -e "${RED}[x] Password cannot be empty.${RESET}"
+    return
+  fi
+
+  # 2. Update password in auth.users using Admin API
+  # Note: The auth admin endpoint is /auth/v1/admin/users/{id}
+  RESPONSE=$(curl -s -X PUT "${SUPABASE_URL}/auth/v1/admin/users/${USER_ID}" \
+    -H "apikey: ${SUPABASE_KEY}" \
+    -H "Authorization: Bearer ${SUPABASE_KEY}" \
+    -H "Content-Type: application/json" \
+    -d "{\"password\": \"${PASS}\"}")
+
+  if [[ "$RESPONSE" == *"\"id\":"* ]]; then
+    echo -e "${GREEN}[ok] Password for ${username} has been reset successfully.${RESET}"
+  else
+    echo -e "${RED}[x] Failed to reset password.${RESET}"
+    echo -e "${DIM}$RESPONSE${RESET}"
+  fi
+  echo ""
+}
+
 # Main Menu
 while true; do
   echo -e "${WHITE}Options:${RESET}"
   echo -e "  ${GREEN}1${RESET}. List Users"
   echo -e "  ${GREEN}2${RESET}. Approve/Renew Access"
   echo -e "  ${GREEN}3${RESET}. Suspend Access"
-  echo -e "  ${GREEN}4${RESET}. Exit"
+  echo -e "  ${GREEN}4${RESET}. Reset User Password"
+  echo -e "  ${GREEN}5${RESET}. Exit"
   echo ""
-  read -p "Select option (1-4): " OPT
+  read -p "Select option (1-5): " OPT
   echo ""
 
   case $OPT in
@@ -126,6 +172,12 @@ while true; do
       fi
       ;;
     4)
+      read -p "Enter username to reset password: " UNAME
+      if [ -n "$UNAME" ]; then
+        reset_password "$UNAME"
+      fi
+      ;;
+    5)
       echo -e "${CYAN}Goodbye.${RESET}"
       exit 0
       ;;
