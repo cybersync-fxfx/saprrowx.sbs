@@ -193,7 +193,7 @@ export default function Blocklist({ token }) {
         </div>
 
         <div style={{ marginTop: '0.75rem', fontSize: '0.72rem', color: 'var(--text-dim)' }}>
-          Guard set: <span className="font-mono">{guardTable}</span>
+          Guard Engine: <span className="font-mono">{guardTable.includes('detroit_guard') ? 'SparrowX Guard' : guardTable}</span>
         </div>
 
         {feedback.msg && (

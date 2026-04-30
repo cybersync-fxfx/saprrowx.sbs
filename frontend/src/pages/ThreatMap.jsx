@@ -3,7 +3,7 @@ import { ComposableMap, Geographies, Geography, Marker, Line } from 'react-simpl
 import { useTelemetry } from '../context/TelemetryContext';
 
 const geoUrl = "https://unpkg.com/world-atlas@2.0.2/countries-110m.json";
-const GUARD_COORD = [-83.0458, 42.3314]; // Detroit Guard Node
+const GUARD_COORD = [103.8198, 1.3521]; // Singapore Guard Node (SparrowX)
 
 export default function ThreatMap({ token }) {
   const { trafficEvents } = useTelemetry();
@@ -159,7 +159,7 @@ export default function ThreatMap({ token }) {
               <circle r={10} fill="#00d8ff" opacity={0.2} />
               <circle r={4} fill="#00d8ff" />
               <text textAnchor="middle" y={-18} style={{ fontFamily: "monospace", fill: "#00d8ff", fontSize: "11px", fontWeight: 'bold', letterSpacing: '2px', textShadow: "0 0 8px rgba(0, 216, 255, 0.8)" }}>
-                DETROIT GUARD
+                SPARROWX GUARD
               </text>
             </Marker>
             
