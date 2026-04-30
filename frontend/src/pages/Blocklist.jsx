@@ -3,7 +3,16 @@ import { useTelemetry } from '../context/TelemetryContext';
 
 const ipv4Pattern = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/;
 
-export default function Blocklist({ token }) {
+function getFlagEmoji(countryCode) {
+  if (!countryCode || countryCode === 'Unknown') return '🌐';
+  const codePoints = countryCode
+    .toUpperCase()
+    .split('')
+    .map(char => 127397 + char.charCodeAt(0));
+  return String.fromCodePoint(...codePoints);
+}
+
+export default function Blocklist({ token, user }) {
   const { isConnected, refreshGuardBlocklistSummary } = useTelemetry();
 
   const [banInput, setBanInput] = useState('');
@@ -235,16 +244,26 @@ export default function Blocklist({ token }) {
                 <tr>
                   <th style={{ width: '2rem' }}>#</th>
                   <th>IP Address</th>
+                  <th>Location</th>
                   <th>Status</th>
                   <th style={{ textAlign: 'right' }}>Action</th>
                 </tr>
               </thead>
               <tbody>
-                {ips.map((ip, i) => (
-                  <tr key={ip}>
+                {ips.map((item, i) => (
+                  <tr key={item.ip}>
                     <td style={{ color: 'var(--text-dim)', fontSize: '0.8rem' }}>{i + 1}</td>
                     <td className="font-mono" style={{ fontSize: '1rem', letterSpacing: '0.04em' }}>
-                      {ip}
+                      {item.ip}
+                    </td>
+                    <td>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <span style={{ fontSize: '1.1rem' }}>{getFlagEmoji(item.country)}</span>
+                        <div style={{ display: 'flex', flexDirection: 'column' }}>
+                          <span style={{ fontSize: '0.85rem' }}>{item.country}</span>
+                          {item.city && <span style={{ fontSize: '0.72rem', color: 'var(--text-dim)' }}>{item.city} {item.region ? `(${item.region})` : ''}</span>}
+                        </div>
+                      </div>
                     </td>
                     <td>
                       <span
@@ -261,14 +280,18 @@ export default function Blocklist({ token }) {
                       </span>
                     </td>
                     <td style={{ textAlign: 'right' }}>
-                      <button
-                        type="button"
-                        className="secondary-button small"
-                        onClick={() => unbanIp(ip)}
-                        disabled={Boolean(unbanning) || loading || !token}
-                      >
-                        {unbanning === ip ? 'Removing...' : 'Unban'}
-                      </button>
+                      {user?.role === 'admin' ? (
+                        <button
+                          type="button"
+                          className="secondary-button small"
+                          onClick={() => unbanIp(item.ip)}
+                          disabled={Boolean(unbanning) || loading || !token}
+                        >
+                          {unbanning === item.ip ? 'Removing...' : 'Unban'}
+                        </button>
+                      ) : (
+                        <span style={{ fontSize: '0.75rem', color: 'var(--text-dim)', fontStyle: 'italic' }}>Admin only</span>
+                      )}
                     </td>
                   </tr>
                 ))}

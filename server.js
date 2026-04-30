@@ -980,11 +980,22 @@ app.post('/api/admin/reject', authMiddleware, adminMiddleware, privilegedSupabas
   res.json({ success: true });
 });
 
-app.get('/api/guard/blocklist', authMiddleware, adminMiddleware, (req, res) => {
+app.get('/api/guard/blocklist', authMiddleware, (req, res) => {
   try {
     const result = listGuardBlockedIps();
+    const enrichedIps = (result.ips || []).map(ip => {
+      const geo = geoip.lookup(ip);
+      return {
+        ip,
+        country: geo?.country || 'Unknown',
+        city: geo?.city || '',
+        region: geo?.region || '',
+        ll: geo?.ll || null
+      };
+    });
+
     res.json({
-      ips: result.ips,
+      ips: enrichedIps,
       table: `${result.family} ${result.table}`,
     });
   } catch (err) {
@@ -1035,9 +1046,20 @@ app.post('/api/guard/blocklist', authMiddleware, adminMiddleware, (req, res) => 
       table: `${result.family} ${result.table}`,
       updatedAt: new Date().toISOString(),
     });
+    const enrichedIps = (result.ips || []).map(itemIp => {
+      const geo = geoip.lookup(itemIp);
+      return {
+        ip: itemIp,
+        country: geo?.country || 'Unknown',
+        city: geo?.city || '',
+        region: geo?.region || '',
+        ll: geo?.ll || null
+      };
+    });
+
     res.json({
       success: true,
-      ips: result.ips,
+      ips: enrichedIps,
       totalBanned: banTotal.totalBanned,
       table: `${result.family} ${result.table}`,
     });
@@ -1075,9 +1097,20 @@ app.delete('/api/guard/blocklist/:ip', authMiddleware, adminMiddleware, (req, re
       table: `${result.family} ${result.table}`,
       updatedAt: new Date().toISOString(),
     });
+    const enrichedIps = (result.ips || []).map(itemIp => {
+      const geo = geoip.lookup(itemIp);
+      return {
+        ip: itemIp,
+        country: geo?.country || 'Unknown',
+        city: geo?.city || '',
+        region: geo?.region || '',
+        ll: geo?.ll || null
+      };
+    });
+
     res.json({
       success: true,
-      ips: result.ips,
+      ips: enrichedIps,
       totalBanned: Number(db.sbsBanTotal || 0),
       table: `${result.family} ${result.table}`,
     });
