@@ -182,7 +182,6 @@ function getOrAllocateTunnelConfig(agentId, meta = {}) {
   };
 
   state.allocations[key] = config;
-  state.allocations[key] = config;
   saveTunnelState(state);
   return { ...config, statePath: getTunnelStatePath() };
 }

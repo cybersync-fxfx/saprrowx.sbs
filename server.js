@@ -48,6 +48,24 @@ const wss = new WebSocket.Server({ server });
 const FRONTEND_DIST_DIR = path.join(__dirname, 'frontend', 'dist');
 const FRONTEND_INDEX_PATH = path.join(FRONTEND_DIST_DIR, 'index.html');
 
+// -- Rate limiters ------------------------------------------
+const authRateLimiter = new Map(); // ip -> { count, resetAt }
+function checkRateLimit(ip, max = 20, windowMs = 60000) {
+  const now = Date.now();
+  const entry = authRateLimiter.get(ip) || { count: 0, resetAt: now + windowMs };
+  if (now > entry.resetAt) { entry.count = 0; entry.resetAt = now + windowMs; }
+  entry.count += 1;
+  authRateLimiter.set(ip, entry);
+  return entry.count <= max;
+}
+// Clean up rate limit map every 5 minutes
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, entry] of authRateLimiter) {
+    if (now > entry.resetAt) authRateLimiter.delete(ip);
+  }
+}, 5 * 60 * 1000);
+
 const lastAttackAlertSentAt = {};
 
 const DISCORD_WEBHOOKS = {
@@ -858,7 +876,14 @@ const agentAuthMiddleware = async (req, res, next) => {
 
 // Routes
 app.post('/api/auth/register', async (req, res) => {
+  const clientIp = normalizeIp(req.headers['x-forwarded-for'] || req.socket.remoteAddress);
+  if (!checkRateLimit(clientIp, 10, 60000)) {
+    return res.status(429).json({ error: 'Too many registration attempts. Please try again later.' });
+  }
   const { username, email, password } = req.body;
+  if (!email || !password || !username) {
+    return res.status(400).json({ error: 'username, email, and password are required.' });
+  }
   const { data, error } = await supabase.auth.signUp({
     email,
     password,
@@ -872,20 +897,18 @@ app.post('/api/auth/register', async (req, res) => {
 });
 
 app.post('/api/auth/login', async (req, res) => {
-  const { username, password } = req.body; // In Supabase, we log in with email.
-  // The frontend currently passes "username" which could be an email or username.
-  // Supabase signInWithPassword expects an email. We will assume 'username' field contains the email for now.
+  const clientIp = normalizeIp(req.headers['x-forwarded-for'] || req.socket.remoteAddress);
+  if (!checkRateLimit(clientIp, 15, 60000)) {
+    return res.status(429).json({ error: 'Too many login attempts. Please try again in a minute.' });
+  }
+  const { username, password } = req.body;
   const email = username; 
+  if (!email || !password) return res.status(400).json({ error: 'email and password are required.' });
   
-  const { data, error } = await supabase.auth.signInWithPassword({
-    email,
-    password
-  });
-  
+  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
   if (error) return res.status(401).json({ error: error.message });
   
   const token = data.session.access_token;
-  // Fetch profile to return
   const userClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
     global: { headers: { Authorization: `Bearer ${token}` } }
   });
@@ -2043,8 +2066,8 @@ app.post('/api/agent/stats', agentAuthMiddleware, (req, res) => {
 app.get('/api/agent/last-stats', authMiddleware, (req, res) => {
   const cached = db.lastStats?.[req.user.id];
   if (!cached) return res.json({ available: false });
-  // Only return if agent sent stats within the last 30 seconds
-  if (Date.now() - cached.savedAt > 30000) return res.json({ available: false });
+  // Only return if agent sent stats within the last 60 seconds (agent reports every 1s)
+  if (Date.now() - cached.savedAt > 60000) return res.json({ available: false });
   res.json({ available: true, ...cached });
 });
 
@@ -2753,6 +2776,14 @@ setInterval(() => {
       if (agent.userId) {
         broadcastToUser(agent.userId, { type: 'agent_disconnected', agentId, agentStatus: 'NO AGENT' });
       }
+      // Persist offline status to Supabase so dashboard reflects reality on next load
+      if (ADMIN_FEATURES_ENABLED) {
+        supabaseAdmin
+          .from('user_profiles')
+          .update({ tunnel_status: 'inactive' })
+          .eq('agent_id', agentId)
+          .catch((err) => console.error(`[heartbeat] failed to persist offline status for ${agentId}:`, err.message));
+      }
     }
   }
 }, 5000);
@@ -2848,7 +2879,29 @@ app.get('/api/internal/storage-status', (req, res) => {
 });
 
 app.get('/api/health', (req, res) => {
-  res.json({ ok: true });
+  res.json({ ok: true, uptime: process.uptime(), ts: new Date().toISOString() });
+});
+
+// Detailed health check for monitoring tools
+app.get('/api/health/detailed', (req, res) => {
+  const clientIp = req.socket.remoteAddress;
+  if (clientIp !== '127.0.0.1' && clientIp !== '::1' && clientIp !== '::ffff:127.0.0.1') {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  const mem = process.memoryUsage();
+  res.json({
+    ok: true,
+    uptime: process.uptime(),
+    ts: new Date().toISOString(),
+    connectedAgents: Object.keys(db.agents || {}).length,
+    connectedDashboards: Object.values(clients).reduce((acc, arr) => acc + arr.length, 0),
+    commandQueueDepth: Object.values(commandQueue).reduce((acc, arr) => acc + arr.length, 0),
+    radarEnabled: radar ? radar.config.enabled : false,
+    radarLastScan: radar ? radar.lastScanAt : null,
+    memMb: Math.round(mem.rss / 1024 / 1024),
+    heapMb: Math.round(mem.heapUsed / 1024 / 1024),
+    sbsBanTotal: Number(db.sbsBanTotal || 0),
+  });
 });
 
 // Threat Radar API
@@ -2979,20 +3032,29 @@ app.use((req, res) => {
 
 server.listen(PORT, () => {
   console.log(`\x1b[32m[ok] ${PRODUCT_NAME} server listening on port ${PORT}\x1b[0m`);
-  
-  /*
-  sendDiscordWebhook('info', {
-    embeds: [{
-      title: '🚀 Sparrowx Server Started',
-      color: 10181046,
-      description: `The Sparrowx DDoS Guard Control Panel is now online.`,
-      fields: [
-        { name: 'Port', value: `\`${PORT}\``, inline: true },
-        { name: 'Product', value: `\`${PRODUCT_NAME}\``, inline: true }
-      ],
-      timestamp: new Date().toISOString(),
-      footer: { text: 'Sparrowx System Info' }
-    }]
-  });
+  /* Discord webhook disabled to prevent spam on restart loops
+  sendDiscordWebhook('info', { ... });
   */
 });
+
+// -- Graceful Shutdown ----------------------------------------
+// Ensures runtime state is persisted before PM2/systemd kills the process.
+// Prevents dashboard data loss on planned restarts.
+function gracefulShutdown(signal) {
+  console.log(`\x1b[33m[!] ${signal} received — flushing state and shutting down...\x1b[0m`);
+  try {
+    persistRuntimeSnapshot();
+    console.log('\x1b[32m[ok] Runtime state persisted.\x1b[0m');
+  } catch (err) {
+    console.error('[!] Failed to persist state on shutdown:', err.message);
+  }
+  server.close(() => {
+    console.log('\x1b[32m[ok] Server closed gracefully.\x1b[0m');
+    process.exit(0);
+  });
+  // Force kill after 8 seconds if server hasn't closed
+  setTimeout(() => process.exit(1), 8000);
+}
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));

@@ -2,12 +2,14 @@
   "name": "sparrowx",
   "version": "1.0.0",
   "description": "Sparrowx autonomous infrastructure security panel",
-  "main": "index.js",
+  "main": "server.js",
   "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
     "build": "npm --prefix frontend ci && npm --prefix frontend run build",
     "frontend:build": "npm --prefix frontend run build",
     "frontend:dev": "npm --prefix frontend run dev",
-    "start": "node server.js",
+    "health": "curl -s http://localhost:3001/api/health | node -e \"process.stdin.resume();process.stdin.setEncoding('utf8');let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>console.log(JSON.parse(d)))\"",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "repository": {
