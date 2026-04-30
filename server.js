@@ -3010,6 +3010,7 @@ app.get('/api/radar/stats', authMiddleware, async (req, res) => {
     const since = new Date(Date.now() - 86400000).toISOString();
     const guardBlocklist = getGuardBlocklistSummary();
 
+    const isAdmin = req.user.role === 'admin';
     const userAgent = Object.values(db.agents).find(a => a.userId === req.user.id);
     const agentId = userAgent ? userAgent.agentId : null;
 
@@ -3017,8 +3018,19 @@ app.get('/api/radar/stats', authMiddleware, async (req, res) => {
       .from('threat_radar')
       .select('*');
     
-    if (agentId) {
+    // Admins see EVERYTHING, regular users only see their own agent's logs
+    if (!isAdmin && agentId) {
       query = query.eq('target_agent_id', agentId);
+    } else if (!isAdmin && !agentId) {
+      // Non-admin without an agent sees nothing
+      return res.json({
+        totalBanned: Number(db.sbsBanTotal || 0),
+        scannedToday: 0,
+        blockedToday: 0,
+        recent: [],
+        liveScores: [],
+        guardBlocklist
+      });
     }
 
     const { data: recent, error: recentError } = await query
@@ -3030,7 +3042,7 @@ app.get('/api/radar/stats', authMiddleware, async (req, res) => {
       .from('threat_radar')
       .select('*', { count: 'exact', head: true })
       .gte('detected_at', since);
-    if (agentId) scannedQuery.eq('target_agent_id', agentId);
+    if (!isAdmin && agentId) scannedQuery.eq('target_agent_id', agentId);
     const { count: scannedToday, error: scannedError } = await scannedQuery;
     if (scannedError) throw scannedError;
 
@@ -3039,13 +3051,13 @@ app.get('/api/radar/stats', authMiddleware, async (req, res) => {
       .select('*', { count: 'exact', head: true })
       .eq('action', 'banned')
       .gte('detected_at', since);
-    if (agentId) blockedQuery.eq('target_agent_id', agentId);
+    if (!isAdmin && agentId) blockedQuery.eq('target_agent_id', agentId);
     const { count: blockedToday, error: blockedError } = await blockedQuery;
     if (blockedError) throw blockedError;
 
-    // Filter liveScores by agent
+    // Filter liveScores by agent (unless admin)
     let liveScores = radar ? radar.getLiveScores() : [];
-    if (agentId) {
+    if (!isAdmin && agentId) {
       // Find IPs associated with this agent
       const tunnels = listTunnelConfigs();
       const agentTunnels = tunnels.filter(t => t.agentId === agentId);
