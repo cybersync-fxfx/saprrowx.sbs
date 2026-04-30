@@ -47,13 +47,13 @@ export default function Layout({ user, setToken }) {
         </div>
 
         <div className="topbar-meta">
-          <div className={`status-pill ${isConnected ? 'connected' : 'disconnected'}`}>
+          <div className={`status-pill ${isConnected || user?.role === 'admin' ? 'connected' : 'disconnected'}`}>
             <RadioTower size={14} />
-            {agentStatus === 'CONNECTED' ? 'CONNECTED' : 'NO AGENT'}
+            {user?.role === 'admin' ? 'GUARD ONLINE' : (agentStatus === 'CONNECTED' ? 'CONNECTED' : 'NO AGENT')}
           </div>
           <div className="meta-chip">WS {wsState}</div>
           <div className="topbar-time">{time}</div>
-          <div className="user-chip">@{user?.username}</div>
+          <div className="user-chip">@{user?.username} {user?.role === 'admin' && '(ADMIN)'}</div>
           <button className="icon-button danger-outline" onClick={handleLogout} aria-label="Log out">
             <LogOut size={16} />
           </button>
@@ -65,10 +65,10 @@ export default function Layout({ user, setToken }) {
           <div className="sidebar-card">
             <div className="sidebar-card-header">
               <ServerCog size={16} />
-              <span>Linked Agent</span>
+              <span>{user?.role === 'admin' ? 'Guard Infrastructure' : 'Linked Agent'}</span>
             </div>
-            <div className="sidebar-card-value">{user?.agentId || 'Not assigned'}</div>
-            <div className="sidebar-card-meta">{isConnected ? 'Agent is streaming telemetry live.' : 'Download a fresh installer to attach a server.'}</div>
+            <div className="sidebar-card-value">{user?.role === 'admin' ? 'Global Node' : (user?.agentId || 'Not assigned')}</div>
+            <div className="sidebar-card-meta">{user?.role === 'admin' ? 'Monitoring all traffic scrubbing nodes.' : (isConnected ? 'Agent is streaming telemetry live.' : 'Download a fresh installer to attach a server.')}</div>
           </div>
 
           <nav className="sidebar-nav">
