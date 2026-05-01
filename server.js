@@ -3059,7 +3059,6 @@ function getRadarModePatch(mode) {
 }
 
 // -- Websocket logic ------------------------------------------
-const clients = {}; // { userId: [ws1, ws2] }
 
 wss.on('connection', (ws, req) => {
   const url = new URL(req.url, 'http://localhost');
