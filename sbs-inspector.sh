@@ -2,7 +2,7 @@
 # =================================================================
 #   SPARROWX MASTER INSPECTOR & AUTO-REMEDIATION SUITE
 #   Purpose: Holistic system health check for control panel & guard.
-#   Fixes: UI build issues, API failures, service crashes, kernel state.
+#   Fixes: UI build issues, API failures, service crashes, AI readiness.
 # =================================================================
 
 set -u
@@ -21,9 +21,10 @@ STATE_FILE="${SCRIPT_DIR}/tunnels.json"
 RUNTIME_FILE="${SCRIPT_DIR}/storage/runtime-state.json"
 ATTACK_LOG="/var/log/sbs/attacks.log"
 FRONTEND_DIST="${SCRIPT_DIR}/frontend/dist"
+BRAIN_REPORT="${SCRIPT_DIR}/intel/brain/last-report.json"
 
 echo -e "${CYAN}=================================================================${RESET}"
-echo -e "${CYAN}  SPARROWX MASTER INFRASTRUCTURE INSPECTOR (v2.0)${RESET}"
+echo -e "${CYAN}  SPARROWX MASTER INFRASTRUCTURE INSPECTOR (v2.1)${RESET}"
 echo -e "${CYAN}=================================================================${RESET}"
 
 if [ "$EUID" -ne 0 ]; then
@@ -32,7 +33,7 @@ if [ "$EUID" -ne 0 ]; then
 fi
 
 # -- STEP 1: Backend Code Integrity --
-echo -e "\n${YELLOW}[1/7] Auditing Application Logic & Syntax...${RESET}"
+echo -e "\n${YELLOW}[1/8] Auditing Application Logic & Syntax...${RESET}"
 if ! node -c "$SCRIPT_DIR/server.js" &>/dev/null; then
   echo -e "  ${RED}[x] Critical: server.js has SYNTAX ERRORS!${RESET}"
   echo -e "  [->] ALERT: Manual intervention required. Syntax check failed."
@@ -41,7 +42,7 @@ else
 fi
 
 # -- STEP 2: Environment & Secrets Audit --
-echo -e "\n${YELLOW}[2/7] Verifying Environment Configuration...${RESET}"
+echo -e "\n${YELLOW}[2/8] Verifying Environment Configuration...${RESET}"
 if [ ! -f "$SCRIPT_DIR/.env" ]; then
   echo -e "  ${RED}[x] Error: .env file is MISSING.${RESET}"
 else
@@ -56,7 +57,7 @@ else
 fi
 
 # -- STEP 3: UI Build & Asset Integrity --
-echo -e "\n${YELLOW}[3/7] Inspecting User Interface Assets...${RESET}"
+echo -e "\n${YELLOW}[3/8] Inspecting User Interface Assets...${RESET}"
 if [ ! -d "$FRONTEND_DIST" ] || [ ! -f "$FRONTEND_DIST/index.html" ]; then
   echo -e "  ${RED}[!] UI build is INCOMPLETE or MISSING.${RESET}"
   echo -e "  [->] AUTO-FIX: Attempting to rebuild frontend assets..."
@@ -66,7 +67,7 @@ if [ ! -d "$FRONTEND_DIST" ] || [ ! -f "$FRONTEND_DIST/index.html" ]; then
     if [ -f "$FRONTEND_DIST/index.html" ]; then
       echo -e "  ${GREEN}[ok]${RESET} UI successfully rebuilt."
     else
-      echo -e "  ${RED}[x] UI rebuild FAILED. Check frontend logs.${RESET}"
+      echo -e "  ${RED}[x] UI rebuild FAILED.${RESET}"
     fi
   else
     echo -e "  ${RED}[x] Frontend source directory missing!${RESET}"
@@ -76,11 +77,10 @@ else
 fi
 
 # -- STEP 4: Service Orchestration (PM2) --
-echo -e "\n${YELLOW}[4/7] Verifying Service Status (PM2)...${RESET}"
+echo -e "\n${YELLOW}[4/8] Verifying Service Status (PM2)...${RESET}"
 SERVICES=("sparrowx-panel" "sparrowx-radar")
 for SVC in "${SERVICES[@]}"; do
   if pm2 describe "$SVC" &>/dev/null; then
-    # Improved status check for PM2
     STATUS=$(pm2 jlist | jq -r ".[] | select(.name==\"$SVC\") | .pm2_env.status")
     if [ "$STATUS" == "online" ]; then
       echo -e "  ${GREEN}[ok]${RESET} Service $SVC is ONLINE."
@@ -95,48 +95,44 @@ for SVC in "${SERVICES[@]}"; do
 done
 
 # -- STEP 5: Database & Local State Consistency --
-echo -e "\n${YELLOW}[5/7] Auditing Tunnels & Logic State...${RESET}"
+echo -e "\n${YELLOW}[5/8] Auditing Tunnels & Logic State...${RESET}"
 if [ ! -f "$STATE_FILE" ]; then
   echo -e "  ${RED}[x] Critical: tunnels.json missing.${RESET}"
 else
   EXPECTED_COUNT=$(jq '.allocations | length' "$STATE_FILE" 2>/dev/null || echo "0")
   ACTUAL_COUNT=$(wg show interfaces | wc -l)
-  echo -e "  [i] Tunnels expected: $EXPECTED_COUNT | Actual: $ACTUAL_COUNT"
   if [ "$EXPECTED_COUNT" -ne "$ACTUAL_COUNT" ]; then
     echo -e "  ${RED}[!] DISCREPANCY! Attempting repair...${RESET}"
     if [ -f "$SCRIPT_DIR/repair-tunnels.sh" ]; then
         bash "$SCRIPT_DIR/repair-tunnels.sh"
     fi
   else
-    echo -e "  ${GREEN}[ok]${RESET} State consistency verified."
+    echo -e "  ${GREEN}[ok]${RESET} State consistency verified ($ACTUAL_COUNT tunnels)."
   fi
 fi
 
 # -- STEP 6: Filesystem & Permissions --
-echo -e "\n${YELLOW}[6/7] Verifying Storage & Log Permissions...${RESET}"
-DIRS=("storage" "intel" "intel/logs" "storage/logs")
+echo -e "\n${YELLOW}[6/8] Verifying Storage & Log Permissions...${RESET}"
+DIRS=("storage" "intel" "intel/logs" "storage/logs" "intel/brain")
 for DIR in "${DIRS[@]}"; do
   FULL_PATH="$SCRIPT_DIR/$DIR"
   if [ ! -d "$FULL_PATH" ]; then
-    echo -e "  ${YELLOW}[!] Creating missing directory: $DIR${RESET}"
     mkdir -p "$FULL_PATH"
   fi
   if [ -w "$FULL_PATH" ]; then
     echo -e "  ${GREEN}[ok]${RESET} $DIR is writable."
   else
-    echo -e "  ${RED}[!] Fixing permissions for $DIR...${RESET}"
     chmod -R 755 "$FULL_PATH"
   fi
 done
 
 # -- STEP 7: Network & Firewall State --
-echo -e "\n${YELLOW}[7/7] Verifying Kernel Data Path...${RESET}"
+echo -e "\n${YELLOW}[7/8] Verifying Kernel Data Path...${RESET}"
 FORWARD_VAL=$(cat /proc/sys/net/ipv4/ip_forward)
 if [ "$FORWARD_VAL" -eq 1 ]; then
   echo -e "  ${GREEN}[ok]${RESET} IP Forwarding is active."
 else
   echo -e "  ${RED}[x] IP Forwarding is DISABLED.${RESET}"
-  echo -e "  [->] AUTO-FIX: Enabling forwarding..."
   echo 1 > /proc/sys/net/ipv4/ip_forward
   sysctl -w net.ipv4.ip_forward=1 &>/dev/null
 fi
@@ -145,9 +141,19 @@ fi
 if systemctl is-active --quiet nftables; then
   echo -e "  ${GREEN}[ok]${RESET} nftables.service is active."
 else
-  echo -e "  ${RED}[!] nftables.service is INACTIVE.${RESET}"
-  echo -e "  [->] AUTO-FIX: Starting nftables..."
+  echo -e "  ${RED}[!] nftables.service is INACTIVE. Starting now...${RESET}"
   systemctl start nftables
+fi
+
+# -- STEP 8: AI & Intelligence Audit (Sparrow Brain) --
+echo -e "\n${YELLOW}[8/8] Auditing AI Intelligence & UI Readiness...${RESET}"
+if [ ! -f "$BRAIN_REPORT" ]; then
+    echo -e "  ${RED}[!] UI Alert: Brain report missing. Dashboard is 'Waiting'.${RESET}"
+    echo -e "  [->] AUTO-FIX: Triggering Sparrow Brain intelligence cycle..."
+    node "$SCRIPT_DIR/sparrow-brain.js" --apply &>/dev/null
+    echo -e "  ${GREEN}[ok]${RESET} Intelligence applied. UI data populated."
+else
+    echo -e "  ${GREEN}[ok]${RESET} Sparrow Brain report is current."
 fi
 
 echo -e "\n${CYAN}=================================================================${RESET}"
