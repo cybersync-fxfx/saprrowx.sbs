@@ -3316,38 +3316,7 @@ app.post('/api/internal/security-fix', authMiddleware, adminMiddleware, (req, re
   }
 });
 
-// -- Threat Radar Mode & Config -------------------------------
-app.post('/api/radar/mode', authMiddleware, adminMiddleware, (req, res) => {
-  const { mode } = req.body;
-  if (!['normal', 'strict', 'shield'].includes(mode)) {
-    return res.status(400).json({ error: 'Invalid mode' });
-  }
 
-  if (radar) {
-    radar.setMode(mode);
-    broadcastToAll({ type: 'radar_mode_changed', mode });
-    res.json({ success: true, mode });
-  } else {
-    res.status(503).json({ error: 'Threat Radar not initialized on this node.' });
-  }
-});
-
-app.get('/api/radar/config', authMiddleware, adminMiddleware, (req, res) => {
-  if (radar) {
-    res.json(radar.getConfig());
-  } else {
-    res.status(503).json({ error: 'Threat Radar not initialized.' });
-  }
-});
-
-app.post('/api/radar/config', authMiddleware, adminMiddleware, (req, res) => {
-  if (radar) {
-    radar.updateConfig(req.body);
-    res.json({ success: true, config: radar.getConfig() });
-  } else {
-    res.status(503).json({ error: 'Threat Radar not initialized.' });
-  }
-});
 
 app.post('/api/guard/command', authMiddleware, adminMiddleware, (req, res) => {
   const { command } = req.body;
@@ -3377,35 +3346,6 @@ app.post('/api/guard/command', authMiddleware, adminMiddleware, (req, res) => {
   }
 });
 
-app.get('/api/internal/brain-insight', authMiddleware, (req, res) => {
-  // Generate "intelligence" from attack logs and current radar state
-  const liveScores = radar ? radar.getLiveScores() : [];
-  const topAttackers = liveScores
-    .sort((a, b) => b.score - a.score)
-    .slice(0, 5)
-    .map(s => ({ ip: s.ip, hitCount: Math.floor(s.score / 10) }));
-
-  const peakHours = {};
-  for (let i = 0; i < 24; i++) peakHours[i] = Math.floor(Math.random() * 10);
-  peakHours[new Date().getHours()] = 45; // Make current hour look "busy"
-
-  const insight = {
-    memory: {
-      lastAnalyzed: new Date().toISOString(),
-      knownAttackersCount: (radar ? radar.bannedIps.size : 0) + 12,
-      totalEvents: (radar ? radar.scanCount : 0) * 5 + 142,
-      peakHours,
-      topAttackers,
-      learnedThresholds: radar ? radar.config : {
-        threshold: 90,
-        synBan: 90,
-        udpBan: 360,
-        portFanoutBan: 12
-      }
-    }
-  };
-  res.json(insight);
-});
 
 // Detailed health check for monitoring tools
 app.get('/api/health/detailed', (req, res) => {

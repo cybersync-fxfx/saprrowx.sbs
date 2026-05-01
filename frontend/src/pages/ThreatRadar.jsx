@@ -119,8 +119,17 @@ export default function ThreatRadar({ token }) {
         },
         body: JSON.stringify({ mode }),
       });
+      
+      const contentType = res.headers.get('content-type');
+      if (!contentType || !contentType.includes('application/json')) {
+        const text = await res.text();
+        console.error('[Radar] Non-JSON response:', text.substring(0, 200));
+        throw new Error(`Server returned unexpected format (${res.status}). The panel might be restarting or build is out of sync.`);
+      }
+
       const payload = await res.json();
       if (!res.ok) throw new Error(payload.error || 'Failed to change defense mode.');
+      
       if (payload?.radar?.config) {
         setConfig((prev) => ({ ...prev, ...payload.radar.config }));
       }
