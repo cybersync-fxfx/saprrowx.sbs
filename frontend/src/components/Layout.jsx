@@ -122,7 +122,12 @@ export default function Layout({ user, setToken }) {
                   <div>
                     <div className="nav-link-title">{item.name}</div>
                     <div className="nav-link-caption">
-                      {viewMode === 'global' ? item.caption.replace(/your server|the agent/gi, 'global infrastructure') : item.caption}
+                      {(() => {
+                        const cap = item.caption || '';
+                        return viewMode === 'global' 
+                          ? cap.replace(/your server|the agent/gi, 'global infrastructure') 
+                          : cap;
+                      })()}
                     </div>
                   </div>
                 </NavLink>

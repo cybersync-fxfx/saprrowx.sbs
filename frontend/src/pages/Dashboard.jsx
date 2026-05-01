@@ -16,7 +16,6 @@ const CHART_POINTS = 60;
 export default function Dashboard({ token }) {
   const {
     stats, cpuHistory, netHistory, connHistory, logs,
-    guardCpuHistory, guardNetHistory, guardConnHistory,
     trafficEvents, isConnected, wsState, lastUpdateMs, viewMode,
   } = useTelemetry();
 
@@ -64,65 +63,53 @@ export default function Dashboard({ token }) {
   }, [token, tunnelStatus]);
 
   // ── Build chart data objects from context history ─────────────────────────
-  const cpuChartData = useMemo(() => {
-    const history = viewMode === 'global' ? guardCpuHistory : cpuHistory;
-    return {
-      labels: Array(CHART_POINTS).fill(''),
-      datasets: [
-        {
-          label: 'CPU %', borderColor: '#289912', backgroundColor: 'rgba(40,153,18,0.1)',
-          borderWidth: 1.5, tension: 0.4, fill: true, data: history.cpu, pointRadius: 0,
-        },
-        {
-          label: 'MEM %', borderColor: '#ef4444', backgroundColor: 'rgba(239,68,68,0.08)',
-          borderWidth: 1.5, tension: 0.4, fill: true, data: history.mem, pointRadius: 0,
-        },
-      ],
-    };
-  }, [cpuHistory, guardCpuHistory, viewMode]);
+  const cpuChartData = useMemo(() => ({
+    labels: Array(CHART_POINTS).fill(''),
+    datasets: [
+      {
+        label: 'CPU %', borderColor: '#289912', backgroundColor: 'rgba(40,153,18,0.1)',
+        borderWidth: 1.5, tension: 0.4, fill: true, data: cpuHistory.cpu, pointRadius: 0,
+      },
+      {
+        label: 'MEM %', borderColor: '#ef4444', backgroundColor: 'rgba(239,68,68,0.08)',
+        borderWidth: 1.5, tension: 0.4, fill: true, data: cpuHistory.mem, pointRadius: 0,
+      },
+    ],
+  }), [cpuHistory]);
 
-  const netChartData = useMemo(() => {
-    const history = viewMode === 'global' ? guardNetHistory : netHistory;
-    return {
-      labels: Array(CHART_POINTS).fill(''),
-      datasets: [
-        {
-          label: 'In (Mbps)', borderColor: '#289912', backgroundColor: 'rgba(40,153,18,0.1)',
-          borderWidth: 1.5, tension: 0.4, fill: true, data: history.inb, pointRadius: 0,
-        },
-        {
-          label: 'Out (Mbps)', borderColor: '#55c934', backgroundColor: 'rgba(85,201,52,0.09)',
-          borderWidth: 1.5, tension: 0.4, fill: true, data: history.out, pointRadius: 0,
-        },
-      ],
-    };
-  }, [netHistory, guardNetHistory, viewMode]);
+  const netChartData = useMemo(() => ({
+    labels: Array(CHART_POINTS).fill(''),
+    datasets: [
+      {
+        label: 'In (Mbps)', borderColor: '#289912', backgroundColor: 'rgba(40,153,18,0.1)',
+        borderWidth: 1.5, tension: 0.4, fill: true, data: netHistory.inb, pointRadius: 0,
+      },
+      {
+        label: 'Out (Mbps)', borderColor: '#55c934', backgroundColor: 'rgba(85,201,52,0.09)',
+        borderWidth: 1.5, tension: 0.4, fill: true, data: netHistory.out, pointRadius: 0,
+      },
+    ],
+  }), [netHistory]);
 
-  const tcpChartData = useMemo(() => {
-    const history = viewMode === 'global' ? guardConnHistory : connHistory;
-    return {
-      labels: Array(CHART_POINTS).fill(''),
-      datasets: [
-        {
-          label: 'Established TCP', borderColor: '#22d3ee', backgroundColor: 'rgba(34,211,238,0.08)',
-          borderWidth: 1.5, tension: 0.4, fill: true, data: history.tcp, pointRadius: 0,
-        },
-      ],
-    };
-  }, [connHistory, guardConnHistory, viewMode]);
+  const tcpChartData = useMemo(() => ({
+    labels: Array(CHART_POINTS).fill(''),
+    datasets: [
+      {
+        label: 'Established TCP', borderColor: '#22d3ee', backgroundColor: 'rgba(34,211,238,0.08)',
+        borderWidth: 1.5, tension: 0.4, fill: true, data: connHistory.tcp, pointRadius: 0,
+      },
+    ],
+  }), [connHistory]);
 
-  const udpChartData = useMemo(() => {
-    const history = viewMode === 'global' ? guardConnHistory : connHistory;
-    return {
-      labels: Array(CHART_POINTS).fill(''),
-      datasets: [
-        {
-          label: 'UDP Connections', borderColor: '#a78bfa', backgroundColor: 'rgba(167,139,250,0.08)',
-          borderWidth: 1.5, tension: 0.4, fill: true, data: history.udp, pointRadius: 0,
-        },
-      ],
-    };
-  }, [connHistory, guardConnHistory, viewMode]);
+  const udpChartData = useMemo(() => ({
+    labels: Array(CHART_POINTS).fill(''),
+    datasets: [
+      {
+        label: 'UDP Connections', borderColor: '#a78bfa', backgroundColor: 'rgba(167,139,250,0.08)',
+        borderWidth: 1.5, tension: 0.4, fill: true, data: connHistory.udp, pointRadius: 0,
+      },
+    ],
+  }), [connHistory]);
 
   // ── Derived ──────────────────────────────────────────────────────────────
   const uptimeLabel = useMemo(() => {
@@ -180,7 +167,7 @@ export default function Dashboard({ token }) {
   const statCards = [
     { label: 'Active Connections', value: stats.connections,                tone: 'blue' },
     { label: 'Blocked IPs',       value: totalSbsBans,                     tone: 'red', note: 'Since SBS activation' },
-    { label: 'CPU Usage',         value: `${stats.cpuPercent.toFixed(1)}%`, tone: 'blue' },
+    { label: 'CPU Usage',         value: `${(stats?.cpuPercent || 0).toFixed(1)}%`, tone: 'blue' },
     { label: 'Memory',            value: `${(stats.memPercent || 0).toFixed(1)}%`, tone: 'red' },
     { label: 'Packets / Sec',     value: (stats.pps || 0).toFixed(1),      tone: 'blue' },
     { label: 'Packet Delta',      value: packetDelta,                      tone: 'blue' },

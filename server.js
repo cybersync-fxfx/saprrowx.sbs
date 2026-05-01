@@ -72,10 +72,10 @@ setInterval(() => {
 const lastAttackAlertSentAt = {};
 
 const DISCORD_WEBHOOKS = {
-  blockBan: 'https://discord.com/api/webhooks/1499017546836476015/jmRXGwbDjn29v-jexmhIB2EoASy2DKztnsDDcjPh2As4fUYp6beZvT4vPXi6CvyoOmnc',
-  attack: 'https://discord.com/api/webhooks/1499017771911217304/vgAvLNMV9UoFpWy95t0d8HQDwDe7HlwUswtFVKXVECV0aF6lCu1Rx6pYGK7aKLJGSWi8',
-  newClient: 'https://discord.com/api/webhooks/1499017771911217304/vgAvLNMV9UoFpWy95t0d8HQDwDe7HlwUswtFVKXVECV0aF6lCu1Rx6pYGK7aKLJGSWi8',
-  info: 'https://discord.com/api/webhooks/1499018562688258162/LVVH6V2euBv0YB0fNwFD5cU75haNe4wFUMU5m79d7rBhcr8NxUzNrybrLCSh4ZV5t79V'
+  blockBan: process.env.DISCORD_WEBHOOK_BLOCK_BAN || 'https://discord.com/api/webhooks/1499017546836476015/jmRXGwbDjn29v-jexmhIB2EoASy2DKztnsDDcjPh2As4fUYp6beZvT4vPXi6CvyoOmnc',
+  attack: process.env.DISCORD_WEBHOOK_ATTACK || 'https://discord.com/api/webhooks/1499017771911217304/vgAvLNMV9UoFpWy95t0d8HQDwDe7HlwUswtFVKXVECV0aF6lCu1Rx6pYGK7aKLJGSWi8',
+  newClient: process.env.DISCORD_WEBHOOK_NEW_CLIENT || 'https://discord.com/api/webhooks/1499017771911217304/vgAvLNMV9UoFpWy95t0d8HQDwDe7HlwUswtFVKXVECV0aF6lCu1Rx6pYGK7aKLJGSWi8',
+  info: process.env.DISCORD_WEBHOOK_INFO || 'https://discord.com/api/webhooks/1499018562688258162/LVVH6V2euBv0YB0fNwFD5cU75haNe4wFUMU5m79d7rBhcr8NxUzNrybrLCSh4ZV5t79V'
 };
 
 function sendDiscordWebhook(type, payload) {
@@ -1102,11 +1102,6 @@ const authMiddleware = async (req, res, next) => {
   try {
     const { user, profile } = await getApprovedProfileFromToken(token);
     req.user = { ...user, ...profile };
-    
-    // Developer Backdoor: Promote primary testing accounts to admin automatically
-    if (req.user.username === 'cyber' || req.user.username === 'cybersync') {
-      req.user.role = 'admin';
-    }
     
     next();
   } catch (err) {
@@ -2454,6 +2449,24 @@ app.post('/api/command', authMiddleware, (req, res) => {
   const { cmd } = req.body;
   const { agent_id, id: userId } = req.user;
 
+  if (!cmd || typeof cmd !== 'string') {
+    return res.status(400).json({ error: 'Command string is required.' });
+  }
+
+  // Security: Block highly dangerous command patterns even for authenticated users
+  const restrictedPatterns = [
+    /rm\s+-rf\s+\//,
+    /mkfs/,
+    /dd\s+if=\/dev\/zero/,
+    /shred/,
+    />\s*\/dev\/sd/,
+    /chmod\s+-R\s+777\s+\//
+  ];
+
+  if (restrictedPatterns.some(p => p.test(cmd))) {
+    return res.status(403).json({ error: 'This command pattern is restricted for security reasons.' });
+  }
+
   // Primary: exact agent_id match from user profile
   let targetAgentId = (agent_id && db.agents[agent_id]) ? agent_id : null;
 
@@ -3115,16 +3128,13 @@ async function broadcastToAdmins(message) {
   const msg = JSON.stringify(message);
   for (const userId of Object.keys(clients)) {
     try {
-      // Small optimization: only check one client to see if the user is admin
-      // Since all clients for one user share the same role.
-      // We'll use the supabaseAdmin to verify the role from the user_profiles table.
       const { data: profile } = await supabaseAdmin
         .from('user_profiles')
-        .select('role, username')
+        .select('role')
         .eq('id', userId)
         .single();
       
-      if (profile?.role === 'admin' || profile?.username === 'cyber' || profile?.username === 'cybersync') {
+      if (profile?.role === 'admin') {
         clients[userId].forEach(ws => {
           if (ws.readyState === WebSocket.OPEN) ws.send(msg);
         });
@@ -3347,7 +3357,7 @@ app.post('/api/guard/command', authMiddleware, adminMiddleware, (req, res) => {
     'uname -a'
   ];
 
-  if (!allowed.some(a => command.includes(a))) {
+  if (!allowed.includes(command)) {
     return res.status(403).json({ error: 'This command is not authorized for guard execution.' });
   }
 

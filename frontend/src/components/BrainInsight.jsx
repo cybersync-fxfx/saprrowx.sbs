@@ -29,7 +29,7 @@ export default function BrainInsight({ token }) {
     return () => clearInterval(id);
   }, [viewMode]);
 
-  if (loading || !data || !data.memory.lastAnalyzed) {
+  if (loading || !data || !data.memory || !data.memory.lastAnalyzed) {
     return (
       <div className="brain-empty">
         <Brain size={20} className="brain-icon" />

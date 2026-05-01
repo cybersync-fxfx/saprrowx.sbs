@@ -92,7 +92,7 @@ export function TelemetryProvider({ token, children }) {
   });
 
   const [notifications, setNotifications] = useState([]);
-  const [viewMode, setViewMode] = useState(localStorage.getItem('sparrowx_view_mode') || 'global'); // 'global' or 'agent'
+  const [viewMode, setViewMode] = useState(localStorage.getItem('sparrowx_view_mode') || 'agent'); // 'global' or 'agent'
 
   useEffect(() => {
     try {
