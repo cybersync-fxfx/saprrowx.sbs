@@ -269,6 +269,8 @@ if (!fs.existsSync(FRONTEND_INDEX_PATH)) {
 }
 
 let db = { agents: {} }; // agents store runtime state
+const clients = {}; // userId -> [ws]
+const userRoles = {}; // userId -> role ('admin', 'user', etc.)
 let commandQueue = {}; // { agentId: [{ id, cmd }] }
 let commandLedger = {}; // { cmdId: { agentId, kind, status, output, ... } }
 const agentAutoUpdateAttempts = new Map();
@@ -1098,10 +1100,12 @@ async function getApprovedProfileFromToken(token, select = '*') {
 const authMiddleware = async (req, res, next) => {
   const token = req.headers.authorization?.split(' ')[1];
   if (!token) return res.status(401).json({ error: 'No token provided' });
-
   try {
     const { user, profile } = await getApprovedProfileFromToken(token);
     req.user = { ...user, ...profile };
+    
+    // Cache the role for WebSocket broadcasts and performance
+    userRoles[user.id] = profile.role;
     
     next();
   } catch (err) {
@@ -2870,19 +2874,24 @@ async function applyRadarAutoBan(ip, reason, metrics = {}) {
   
   sendDiscordWebhook('blockBan', {
     embeds: [{
-      title: '🛡️ IP Address Banned',
+      title: '🛡️ Threat Neutralized: IP Banned',
       color: 15158332,
-      description: `An IP address has been blocked automatically by Threat Radar.`,
+      description: `SparrowX Threat Radar has automatically blocked a malicious IP address from the infrastructure.`,
       fields: [
-        { name: 'IP Address', value: `\`${ip}\``, inline: true },
-        { name: 'Action Type', value: `\`auto-ban\``, inline: true },
-        { name: 'Reason', value: reason || 'No reason provided' }
+        { name: 'Target IP', value: `\`${ip}\``, inline: true },
+        { name: 'Detection Reason', value: `\`${reason || 'Anomaly Detected'}\``, inline: true },
+        { name: 'TCP Rate', value: `${metrics.tcp || 0} req/s`, inline: true },
+        { name: 'SYN Rate', value: `${metrics.syn || 0} req/s`, inline: true },
+        { name: 'UDP Rate', value: `${metrics.udp || 0} req/s`, inline: true },
+        { name: 'PPS Delta', value: `${metrics.delta || 0} pps`, inline: true },
       ],
       timestamp: new Date().toISOString(),
-      footer: { text: 'Sparrowx DDoS Guard' }
+      footer: { text: 'SparrowX Guard Intelligence' }
     }]
   });
-  broadcastToAll({
+
+  // Broadcast to admins for the global panel toaster
+  broadcastToAdmins({
     type: 'radar_ban',
     ip,
     reason,
@@ -2892,6 +2901,7 @@ async function applyRadarAutoBan(ip, reason, metrics = {}) {
     totalBanned: banTotal.totalBanned,
     totalBannedUpdatedAt: banTotal.totalBannedUpdatedAt,
   });
+
   broadcastToAll({
     type: 'guard_blocklist_changed',
     count: result.ips.length,
@@ -3061,8 +3071,12 @@ wss.on('connection', (ws, req) => {
 
   const authenticateSocket = async (token) => {
     if (!token) throw new Error('Missing token');
-    const { user, profile } = await getApprovedProfileFromToken(token, 'agent_id,status');
+    const { user, profile } = await getApprovedProfileFromToken(token, 'agent_id,status,role');
     const userId = user.id;
+    
+    // Populate role cache for WebSocket broadcasts
+    userRoles[userId] = profile.role;
+
     if (!clients[userId]) clients[userId] = [];
     clients[userId].push(ws);
     if (authTimer) clearTimeout(authTimer);
@@ -3073,6 +3087,10 @@ wss.on('connection', (ws, req) => {
 
     ws.on('close', () => {
       clients[userId] = clients[userId].filter(c => c !== ws);
+      // Clean up role cache if no more sockets for this user
+      if (clients[userId].length === 0) {
+        delete userRoles[userId];
+      }
     });
   };
 
@@ -3124,23 +3142,14 @@ function broadcastToAll(message) {
 }
 
 // Broadcast only to users with 'admin' role
-async function broadcastToAdmins(message) {
+function broadcastToAdmins(message) {
   const msg = JSON.stringify(message);
   for (const userId of Object.keys(clients)) {
-    try {
-      const { data: profile } = await supabaseAdmin
-        .from('user_profiles')
-        .select('role')
-        .eq('id', userId)
-        .single();
-      
-      if (profile?.role === 'admin') {
-        clients[userId].forEach(ws => {
-          if (ws.readyState === WebSocket.OPEN) ws.send(msg);
-        });
-      }
-    } catch (e) {
-      // Ignore
+    // Use the cached role to avoid hitting Supabase for every broadcast cycle
+    if (userRoles[userId] === 'admin') {
+      clients[userId].forEach(ws => {
+        if (ws.readyState === WebSocket.OPEN) ws.send(msg);
+      });
     }
   }
 }

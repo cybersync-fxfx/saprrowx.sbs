@@ -105,11 +105,11 @@ function App() {
           </>
         ) : (
           <Route element={
-            <TelemetryProvider token={token}>
+            <TelemetryProvider token={token} user={user}>
               <Layout user={user} setToken={setToken} />
             </TelemetryProvider>
           }>
-            <Route path="/"          element={<Dashboard token={token} />} />
+            <Route path="/"          element={<Dashboard token={token} user={user} />} />
             <Route path="/terminal"  element={<Terminal  token={token} user={user} />} />
             <Route path="/firewall"  element={<Firewall  token={token} user={user} />} />
             <Route path="/blocklist" element={<Blocklist token={token} user={user} />} />

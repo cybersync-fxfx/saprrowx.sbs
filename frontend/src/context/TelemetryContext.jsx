@@ -37,7 +37,7 @@ export function useTelemetry() {
   return useContext(TelemetryContext);
 }
 
-export function TelemetryProvider({ token, children }) {
+export function TelemetryProvider({ token, user, children }) {
   // -- Restore persisted state on first render -------------------------------
   const saved = loadFromStorage();
 
@@ -92,7 +92,17 @@ export function TelemetryProvider({ token, children }) {
   });
 
   const [notifications, setNotifications] = useState([]);
-  const [viewMode, setViewMode] = useState(localStorage.getItem('sparrowx_view_mode') || 'agent'); // 'global' or 'agent'
+  const [viewMode, setViewMode] = useState(() => {
+    const savedMode = localStorage.getItem('sparrowx_view_mode') || 'agent';
+    return (user?.role === 'admin') ? savedMode : 'agent';
+  });
+
+  useEffect(() => {
+    if (user && user.role !== 'admin' && viewMode !== 'agent') {
+      console.warn('[Telemetry] Non-admin tried to access global view. Reverting to agent mode.');
+      setViewMode('agent');
+    }
+  }, [user, viewMode]);
 
   useEffect(() => {
     try {
@@ -457,7 +467,7 @@ export function TelemetryProvider({ token, children }) {
             id: Date.now() + Math.random(),
             type: 'danger',
             title: 'Threat Neutralized',
-            message: `IP ${msg.ip} was automatically banned by Threat Radar. Reason: ${msg.reason || 'Suspicious activity'}`,
+            message: `IP ${msg.ip} was automatically banned by Threat Radar. Reason: ${msg.reason || 'Suspicious activity'} [SYN:${msg.metrics?.syn || 0} UDP:${msg.metrics?.udp || 0}]`,
             timestamp: new Date().toISOString(),
           }, ...prev].slice(0, 10));
         } else if (msg.type === 'radar_mode_changed') {

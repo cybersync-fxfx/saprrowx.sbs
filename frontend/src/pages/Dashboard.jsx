@@ -13,7 +13,7 @@ ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Tooltip,
 
 const CHART_POINTS = 60;
 
-export default function Dashboard({ token }) {
+export default function Dashboard({ token, user }) {
   const {
     stats, cpuHistory, netHistory, connHistory, logs,
     trafficEvents, isConnected, wsState, lastUpdateMs, viewMode,
@@ -336,12 +336,16 @@ export default function Dashboard({ token }) {
 
       <section className="hero-panel">
         <div>
-          <p className="eyebrow">{viewMode === 'global' ? 'Infrastructure' : 'Operations Center'}</p>
-          <h1 className="page-title">{viewMode === 'global' ? 'Infrastructure Oversight' : 'System Dashboard'}</h1>
+          <p className="eyebrow">{viewMode === 'global' ? 'Infrastructure' : (user?.role === 'admin' ? 'Operations Center' : 'Security Client')}</p>
+          <h1 className="page-title">
+            {viewMode === 'global' ? 'Infrastructure Oversight' : (user?.role === 'admin' ? 'System Dashboard' : 'Security Console')}
+          </h1>
           <p className="page-copy">
             {viewMode === 'global' 
               ? 'Real-time performance and threat mitigation across the global scrubbing infrastructure.'
-              : 'Live telemetry · network traffic · SSH events · firewall metrics'}
+              : (user?.role === 'admin' 
+                  ? 'Live telemetry · network traffic · SSH events · firewall metrics'
+                  : 'Real-time protection status and traffic telemetry for your protected server.')}
           </p>
         </div>
         <div className="hero-status-stack">
@@ -542,7 +546,7 @@ export default function Dashboard({ token }) {
         )}
       </section>
 
-      <BrainInsight token={token} />
+      {user?.role === 'admin' && <BrainInsight token={token} />}
 
       <section className="glass-panel elevated-panel">
         <div className="panel-heading">
