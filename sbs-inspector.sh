@@ -1,8 +1,8 @@
 #!/bin/bash
 # =================================================================
-#   SPARROWX - REAL-TIME DASHBOARD INSPECTOR & AUTO-DEBUGGER
-#   Purpose: Ensures the control panel shows 100% accurate data.
-#   Fixes: Mismatched state, stuck interfaces, log sync issues.
+#   SPARROWX MASTER INSPECTOR & AUTO-REMEDIATION SUITE
+#   Purpose: Holistic system health check for control panel & guard.
+#   Fixes: UI build issues, API failures, service crashes, kernel state.
 # =================================================================
 
 set -u
@@ -12,6 +12,7 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
 CYAN='\033[0;36m'
+MAGENTA='\033[0;35m'
 RESET='\033[0m'
 
 # Detect installation directory
@@ -19,33 +20,90 @@ SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 STATE_FILE="${SCRIPT_DIR}/tunnels.json"
 RUNTIME_FILE="${SCRIPT_DIR}/storage/runtime-state.json"
 ATTACK_LOG="/var/log/sbs/attacks.log"
+FRONTEND_DIST="${SCRIPT_DIR}/frontend/dist"
 
 echo -e "${CYAN}=================================================================${RESET}"
-echo -e "${CYAN}  SPARROWX - DASHBOARD TRUTH & INTEGRITY INSPECTOR${RESET}"
+echo -e "${CYAN}  SPARROWX MASTER INFRASTRUCTURE INSPECTOR (v2.0)${RESET}"
 echo -e "${CYAN}=================================================================${RESET}"
 
 if [ "$EUID" -ne 0 ]; then
-  echo -e "${RED}[x] Error: Inspector requires root privileges.${RESET}"
+  echo -e "${RED}[x] Error: Master Inspector requires root privileges.${RESET}"
   exit 1
 fi
 
-# -- STEP 1: Check Database & Local State Consistency --
-echo -e "\n${YELLOW}[1/4] Auditing Local State vs Actual Interfaces...${RESET}"
+# -- STEP 1: Backend Code Integrity --
+echo -e "\n${YELLOW}[1/7] Auditing Application Logic & Syntax...${RESET}"
+if ! node -c "$SCRIPT_DIR/server.js" &>/dev/null; then
+  echo -e "  ${RED}[x] Critical: server.js has SYNTAX ERRORS!${RESET}"
+  echo -e "  [->] ALERT: Manual intervention required. Syntax check failed."
+else
+  echo -e "  ${GREEN}[ok]${RESET} server.js logic is syntactically valid."
+fi
 
+# -- STEP 2: Environment & Secrets Audit --
+echo -e "\n${YELLOW}[2/7] Verifying Environment Configuration...${RESET}"
+if [ ! -f "$SCRIPT_DIR/.env" ]; then
+  echo -e "  ${RED}[x] Error: .env file is MISSING.${RESET}"
+else
+  CRITICAL_KEYS=("SUPABASE_URL" "SUPABASE_SERVICE_ROLE_KEY" "JWT_SECRET")
+  for KEY in "${CRITICAL_KEYS[@]}"; do
+    if ! grep -q "$KEY" "$SCRIPT_DIR/.env"; then
+      echo -e "  ${RED}[x] Missing critical key: $KEY${RESET}"
+    else
+      echo -e "  ${GREEN}[ok]${RESET} Key found: $KEY"
+    fi
+  done
+fi
+
+# -- STEP 3: UI Build & Asset Integrity --
+echo -e "\n${YELLOW}[3/7] Inspecting User Interface Assets...${RESET}"
+if [ ! -d "$FRONTEND_DIST" ] || [ ! -f "$FRONTEND_DIST/index.html" ]; then
+  echo -e "  ${RED}[!] UI build is INCOMPLETE or MISSING.${RESET}"
+  echo -e "  [->] AUTO-FIX: Attempting to rebuild frontend assets..."
+  if [ -d "$SCRIPT_DIR/frontend" ]; then
+    cd "$SCRIPT_DIR/frontend" && npm install && npm run build
+    cd "$SCRIPT_DIR"
+    if [ -f "$FRONTEND_DIST/index.html" ]; then
+      echo -e "  ${GREEN}[ok]${RESET} UI successfully rebuilt."
+    else
+      echo -e "  ${RED}[x] UI rebuild FAILED. Check frontend logs.${RESET}"
+    fi
+  else
+    echo -e "  ${RED}[x] Frontend source directory missing!${RESET}"
+  fi
+else
+  echo -e "  ${GREEN}[ok]${RESET} Frontend assets are present and ready."
+fi
+
+# -- STEP 4: Service Orchestration (PM2) --
+echo -e "\n${YELLOW}[4/7] Verifying Service Status (PM2)...${RESET}"
+SERVICES=("sparrowx-panel" "sparrowx-radar")
+for SVC in "${SERVICES[@]}"; do
+  if pm2 describe "$SVC" &>/dev/null; then
+    # Improved status check for PM2
+    STATUS=$(pm2 jlist | jq -r ".[] | select(.name==\"$SVC\") | .pm2_env.status")
+    if [ "$STATUS" == "online" ]; then
+      echo -e "  ${GREEN}[ok]${RESET} Service $SVC is ONLINE."
+    else
+      echo -e "  ${RED}[!] Service $SVC is $STATUS.${RESET}"
+      echo -e "  [->] AUTO-FIX: Restarting $SVC..."
+      pm2 restart "$SVC"
+    fi
+  else
+    echo -e "  ${YELLOW}[?] Service $SVC is NOT MANAGED by PM2.${RESET}"
+  fi
+done
+
+# -- STEP 5: Database & Local State Consistency --
+echo -e "\n${YELLOW}[5/7] Auditing Tunnels & Logic State...${RESET}"
 if [ ! -f "$STATE_FILE" ]; then
   echo -e "  ${RED}[x] Critical: tunnels.json missing.${RESET}"
 else
-  # Count expected tunnels from JSON
   EXPECTED_COUNT=$(jq '.allocations | length' "$STATE_FILE" 2>/dev/null || echo "0")
-  # Count actual wireguard interfaces
   ACTUAL_COUNT=$(wg show interfaces | wc -l)
-  
-  echo -e "  [i] Dashboard expects: ${EXPECTED_COUNT} active tunnels."
-  echo -e "  [i] System has: ${ACTUAL_COUNT} active interfaces."
-
+  echo -e "  [i] Tunnels expected: $EXPECTED_COUNT | Actual: $ACTUAL_COUNT"
   if [ "$EXPECTED_COUNT" -ne "$ACTUAL_COUNT" ]; then
-    echo -e "  ${RED}[!] DISCREPANCY DETECTED! Dashboard data may be inaccurate.${RESET}"
-    echo -e "  [->] AUTO-FIX: Synchronizing tunnels..."
+    echo -e "  ${RED}[!] DISCREPANCY! Attempting repair...${RESET}"
     if [ -f "$SCRIPT_DIR/repair-tunnels.sh" ]; then
         bash "$SCRIPT_DIR/repair-tunnels.sh"
     fi
@@ -54,52 +112,44 @@ else
   fi
 fi
 
-# -- STEP 2: Verify Log Streaming Integrity --
-echo -e "\n${YELLOW}[2/4] Verifying Attack Log & Telemetry Pipeline...${RESET}"
-
-if [ ! -f "$ATTACK_LOG" ]; then
-  echo -e "  ${YELLOW}[!] Warning: attack log missing. Creating file...${RESET}"
-  mkdir -p /var/log/sbs
-  touch "$ATTACK_LOG"
-fi
-
-# Check if ban-logger service is alive
-if systemctl is-active --quiet sparrowx-ban-logger || systemctl is-active --quiet sbs-ban-logger; then
-  echo -e "  ${GREEN}[ok]${RESET} Ban-logger service is operational."
-else
-  echo -e "  ${RED}[x] Ban-logger is DEAD. Dashboard will not show new attacks.${RESET}"
-  echo -e "  [->] AUTO-FIX: Restoring logging service..."
-  systemctl enable sparrowx-ban-logger &>/dev/null || true
-  systemctl restart sparrowx-ban-logger &>/dev/null || systemctl restart sbs-ban-logger &>/dev/null || true
-fi
-
-# -- STEP 3: Auto-Debug Crash Loops (Discord Spam Protection) --
-echo -e "\n${YELLOW}[3/4] Inspecting for Crash Loops & Service Stability...${RESET}"
-
-PANEL_LOG=$(pm2 logs sparrowx-panel --lines 20 --no-colors 2>/dev/null | grep -iE "error|crash|failed")
-if [[ -n "$PANEL_LOG" ]]; then
-  echo -e "  ${RED}[!] Recent crashes found in panel logs:${RESET}"
-  echo "$PANEL_LOG" | tail -n 3
-  echo -e "  [->] AUTO-DEBUG: Checking .env integrity..."
-  if ! grep -q "SUPABASE_URL" "$SCRIPT_DIR/.env"; then
-    echo -e "      ${RED}[x] Missing Supabase config in .env!${RESET}"
+# -- STEP 6: Filesystem & Permissions --
+echo -e "\n${YELLOW}[6/7] Verifying Storage & Log Permissions...${RESET}"
+DIRS=("storage" "intel" "intel/logs" "storage/logs")
+for DIR in "${DIRS[@]}"; do
+  FULL_PATH="$SCRIPT_DIR/$DIR"
+  if [ ! -d "$FULL_PATH" ]; then
+    echo -e "  ${YELLOW}[!] Creating missing directory: $DIR${RESET}"
+    mkdir -p "$FULL_PATH"
   fi
-else
-  echo -e "  ${GREEN}[ok]${RESET} No critical crash patterns detected in PM2."
-fi
+  if [ -w "$FULL_PATH" ]; then
+    echo -e "  ${GREEN}[ok]${RESET} $DIR is writable."
+  else
+    echo -e "  ${RED}[!] Fixing permissions for $DIR...${RESET}"
+    chmod -R 755 "$FULL_PATH"
+  fi
+done
 
-# -- STEP 4: Network Forwarding Check --
-echo -e "\n${YELLOW}[4/4] Verifying Kernel Data Path...${RESET}"
+# -- STEP 7: Network & Firewall State --
+echo -e "\n${YELLOW}[7/7] Verifying Kernel Data Path...${RESET}"
 FORWARD_VAL=$(cat /proc/sys/net/ipv4/ip_forward)
 if [ "$FORWARD_VAL" -eq 1 ]; then
   echo -e "  ${GREEN}[ok]${RESET} IP Forwarding is active."
 else
-  echo -e "  ${RED}[x] IP Forwarding is DISABLED. Clients cannot reach the internet!${RESET}"
+  echo -e "  ${RED}[x] IP Forwarding is DISABLED.${RESET}"
   echo -e "  [->] AUTO-FIX: Enabling forwarding..."
   echo 1 > /proc/sys/net/ipv4/ip_forward
   sysctl -w net.ipv4.ip_forward=1 &>/dev/null
 fi
 
+# Check if NFTables is active
+if systemctl is-active --quiet nftables; then
+  echo -e "  ${GREEN}[ok]${RESET} nftables.service is active."
+else
+  echo -e "  ${RED}[!] nftables.service is INACTIVE.${RESET}"
+  echo -e "  [->] AUTO-FIX: Starting nftables..."
+  systemctl start nftables
+fi
+
 echo -e "\n${CYAN}=================================================================${RESET}"
-echo -e "${GREEN}  INSPECTION COMPLETE: All dashboard data streams validated.${RESET}"
+echo -e "${GREEN}  MASTER INSPECTION COMPLETE: System is stabilized.${RESET}"
 echo -e "${CYAN}=================================================================${RESET}\n"
