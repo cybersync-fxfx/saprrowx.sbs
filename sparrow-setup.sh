@@ -14,6 +14,18 @@ CYAN='\033[0;36m'; BOLD='\033[1m'; DIM='\033[2m'; RESET='\033[0m'
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 LOG_FILE="$SCRIPT_DIR/setup.log"
 declare -a WARNINGS=()
+HTTP_BIND_LINE="bind *:80"
+HTTPS_BIND_LINE="# HTTPS disabled until a valid certificate is installed"
+ALLOWED_TCP_PORTS="22, 80, 443, 3001"
+AUTO_MODE=false
+DOMAIN=""
+PANEL_PORT="3001"
+DISCORD_URL=""
+ADMIN_EMAIL=""
+SERVER_IPV4=""
+SERVER_IPV6=""
+DNS_RECORDS=""
+DNS_MATCHES_SERVER=false
 
 # ── Helpers ───────────────────────────────────────────────────────
 log()  { echo -e "$1" | tee -a "$LOG_FILE"; }
@@ -22,7 +34,70 @@ info() { log "${CYAN}[→] $1${RESET}"; }
 warn() { WARNINGS+=("$1"); log "${YELLOW}[!] $1${RESET}"; }
 err()  { log "${RED}[✗] $1${RESET}"; }
 ask()  { echo -ne "${BOLD}$1${RESET} "; read -r "$2"; }
-askd() { echo -ne "${BOLD}$1${RESET} ${DIM}[${3}]${RESET} "; read -r "$2"; eval "$2=\${$2:-$3}"; }
+askd() {
+  local answer
+  echo -ne "${BOLD}$1${RESET} ${DIM}[${3}]${RESET} "
+  read -r answer
+  printf -v "$2" '%s' "${answer:-$3}"
+}
+
+usage() {
+  cat <<EOF
+Usage: sudo bash sparrow-setup.sh [options]
+
+Options:
+  --auto, -y              Run with detected/default values and no prompts
+  --domain DOMAIN         Panel domain, for example sparrowx.sbs
+  --port PORT             Panel port, default 3001
+  --discord-webhook URL   Discord alert webhook
+  --admin-email EMAIL     Admin email for local config and Let's Encrypt
+  --help, -h              Show this help
+EOF
+}
+
+parse_args() {
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --auto|-y|--yes)
+        AUTO_MODE=true
+        shift
+        ;;
+      --domain)
+        if [ "$#" -lt 2 ]; then err "--domain requires a value"; exit 1; fi
+        DOMAIN="${2:-}"
+        shift 2
+        ;;
+      --port)
+        if [ "$#" -lt 2 ]; then err "--port requires a value"; exit 1; fi
+        PANEL_PORT="${2:-3001}"
+        shift 2
+        ;;
+      --discord-webhook|--discord)
+        if [ "$#" -lt 2 ]; then err "$1 requires a value"; exit 1; fi
+        DISCORD_URL="${2:-}"
+        shift 2
+        ;;
+      --admin-email|--email)
+        if [ "$#" -lt 2 ]; then err "$1 requires a value"; exit 1; fi
+        ADMIN_EMAIL="${2:-}"
+        shift 2
+        ;;
+      --help|-h)
+        usage
+        exit 0
+        ;;
+      *)
+        err "Unknown option: $1"
+        usage
+        exit 1
+        ;;
+    esac
+  done
+
+  if [ ! -t 0 ]; then
+    AUTO_MODE=true
+  fi
+}
 
 apt_install_required() {
   local label="$1"
@@ -98,6 +173,141 @@ systemd_unit_exists() {
   systemctl cat "$1" >/dev/null 2>&1
 }
 
+trim_value() {
+  local value="$1"
+  value="${value#"${value%%[![:space:]]*}"}"
+  value="${value%"${value##*[![:space:]]}"}"
+  printf '%s' "$value"
+}
+
+is_real_domain() {
+  [ -n "$1" ] && [ "$1" != "localhost" ] && [[ ! "$1" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] && [[ "$1" == *.* ]]
+}
+
+first_nonempty_curl() {
+  local url
+  local value
+
+  for url in "$@"; do
+    value="$(curl -fsS --max-time 4 "$url" 2>/dev/null | tr -d '\r\n' || true)"
+    if [ -n "$value" ]; then
+      printf '%s' "$value"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+detect_public_ipv4() {
+  local value
+  value="$(first_nonempty_curl \
+    "https://api.ipify.org" \
+    "https://ipv4.icanhazip.com" \
+    "https://ifconfig.me/ip" || true)"
+
+  if [[ "$value" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    printf '%s' "$value"
+    return 0
+  fi
+
+  hostname -I 2>/dev/null | tr ' ' '\n' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | head -1
+}
+
+detect_public_ipv6() {
+  local value
+  value="$(first_nonempty_curl \
+    "https://api64.ipify.org" \
+    "https://ipv6.icanhazip.com" || true)"
+
+  if [[ "$value" == *:* ]]; then
+    printf '%s' "$value"
+    return 0
+  fi
+
+  hostname -I 2>/dev/null | tr ' ' '\n' | grep ':' | head -1
+}
+
+detect_default_interface() {
+  local iface
+  iface="$(ip -4 route show default 2>/dev/null | awk '{print $5}' | head -1)"
+  if [ -z "$iface" ]; then
+    iface="$(ip -6 route show default 2>/dev/null | awk '{print $5}' | head -1)"
+  fi
+  printf '%s' "$iface"
+}
+
+detect_domain_default() {
+  local candidate
+
+  if [ -n "${SPARROWX_DOMAIN:-}" ]; then
+    printf '%s' "$SPARROWX_DOMAIN"
+    return 0
+  fi
+
+  candidate="$(hostname -f 2>/dev/null || true)"
+  if is_real_domain "$candidate"; then
+    printf '%s' "$candidate"
+    return 0
+  fi
+
+  printf 'localhost'
+}
+
+resolve_domain_records() {
+  local domain="$1"
+
+  if ! is_real_domain "$domain"; then
+    return 0
+  fi
+
+  getent ahosts "$domain" 2>/dev/null | awk '!seen[$1]++ {print $1}' | paste -sd, -
+}
+
+domain_points_to_server() {
+  local records="$1"
+  local record
+  local -a record_list
+
+  IFS=',' read -ra record_list <<< "$records"
+  for record in "${record_list[@]}"; do
+    record="$(trim_value "$record")"
+    if { [ -n "$SERVER_IPV4" ] && [ "$record" = "$SERVER_IPV4" ]; } || { [ -n "$SERVER_IPV6" ] && [ "$record" = "$SERVER_IPV6" ]; }; then
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+normalize_runtime_config() {
+  DOMAIN="$(trim_value "$DOMAIN")"
+  PANEL_PORT="$(trim_value "$PANEL_PORT")"
+  DISCORD_URL="$(trim_value "$DISCORD_URL")"
+  ADMIN_EMAIL="$(trim_value "$ADMIN_EMAIL")"
+
+  [ -z "$DOMAIN" ] && DOMAIN="$(detect_domain_default)"
+  [ -z "$PANEL_PORT" ] && PANEL_PORT="3001"
+  [ -z "$ADMIN_EMAIL" ] && ADMIN_EMAIL="admin@localhost"
+
+  if ! [[ "$PANEL_PORT" =~ ^[0-9]+$ ]] || [ "$PANEL_PORT" -lt 1 ] || [ "$PANEL_PORT" -gt 65535 ]; then
+    warn "Invalid panel port '$PANEL_PORT'; falling back to 3001."
+    PANEL_PORT="3001"
+  fi
+
+  case "$PANEL_PORT" in
+    22|80|443) ALLOWED_TCP_PORTS="22, 80, 443" ;;
+    *) ALLOWED_TCP_PORTS="22, 80, 443, $PANEL_PORT" ;;
+  esac
+
+  DNS_RECORDS="$(resolve_domain_records "$DOMAIN")"
+  if [ -n "$DNS_RECORDS" ] && domain_points_to_server "$DNS_RECORDS"; then
+    DNS_MATCHES_SERVER=true
+  else
+    DNS_MATCHES_SERVER=false
+  fi
+}
+
 ensure_installer_permissions() {
   local script
   local executable_scripts=(
@@ -136,6 +346,116 @@ ensure_installer_permissions() {
   ok "Command permissions normalized"
 }
 
+configure_haproxy_tls() {
+  local cert_dir="/etc/letsencrypt/live/$DOMAIN"
+  local pem_path="/etc/haproxy/certs/sparrowx.pem"
+  local renewal_hook="/etc/letsencrypt/renewal-hooks/deploy/sparrowx-haproxy.sh"
+  local certbot_email_args=()
+
+  if ! is_real_domain "$DOMAIN"; then
+    info "HTTPS certificate skipped for local or IP-only panel domain."
+    return 0
+  fi
+
+  if [ "$DNS_MATCHES_SERVER" != true ]; then
+    warn "Skipping HTTPS certificate because $DOMAIN does not resolve to this VPS yet. Update A/AAAA records, then rerun setup."
+    return 1
+  fi
+
+  if ! command -v certbot >/dev/null 2>&1; then
+    if ! apt_install_if_available "Certbot" certbot; then
+      warn "Certbot is unavailable; HTTPS will stay disabled until a certificate is installed."
+      return 1
+    fi
+  fi
+
+  mkdir -p /etc/haproxy/certs /etc/letsencrypt/renewal-hooks/deploy
+
+  if [ ! -f "$cert_dir/fullchain.pem" ] || [ ! -f "$cert_dir/privkey.pem" ]; then
+    info "Requesting Let's Encrypt certificate for $DOMAIN..."
+    systemctl stop haproxy >/dev/null 2>&1 || true
+
+    if [[ "$ADMIN_EMAIL" == *@* ]] && [ "$ADMIN_EMAIL" != "admin@localhost" ]; then
+      certbot_email_args=(--email "$ADMIN_EMAIL")
+    else
+      certbot_email_args=(--register-unsafely-without-email)
+    fi
+
+    if ! certbot certonly --standalone \
+      --non-interactive --agree-tos \
+      "${certbot_email_args[@]}" \
+      -d "$DOMAIN" >> "$LOG_FILE" 2>&1; then
+      warn "Let's Encrypt certificate request failed; HTTP will still be available on port 80. Check DNS and port 80 reachability."
+      return 1
+    fi
+  fi
+
+  if [ -f "$cert_dir/fullchain.pem" ] && [ -f "$cert_dir/privkey.pem" ]; then
+    cat "$cert_dir/fullchain.pem" "$cert_dir/privkey.pem" > "$pem_path"
+    chmod 0600 "$pem_path"
+    cat > "$renewal_hook" <<EOF
+#!/bin/bash
+cat "$cert_dir/fullchain.pem" "$cert_dir/privkey.pem" > "$pem_path"
+chmod 0600 "$pem_path"
+systemctl reload haproxy >/dev/null 2>&1 || true
+EOF
+    chmod 0755 "$renewal_hook"
+    if [ -n "$SERVER_IPV6" ]; then
+      HTTPS_BIND_LINE="bind :::443 v4v6 ssl crt $pem_path alpn h2,http/1.1"
+    else
+      HTTPS_BIND_LINE="bind *:443 ssl crt $pem_path alpn h2,http/1.1"
+    fi
+    ok "HTTPS certificate ready for $DOMAIN"
+    return 0
+  fi
+
+  warn "HTTPS certificate files were not found after Certbot finished."
+  return 1
+}
+
+run_deployment_health_checks() {
+  local dns_records
+
+  step "Deployment Health Check"
+
+  if curl -fsS --max-time 5 "http://127.0.0.1:${PANEL_PORT}/api/health" >/dev/null 2>&1; then
+    ok "Panel health OK on 127.0.0.1:${PANEL_PORT}"
+  else
+    warn "Panel health check failed on 127.0.0.1:${PANEL_PORT}; inspect pm2 logs sparrowx-panel."
+  fi
+
+  if curl -fsS --max-time 5 "http://127.0.0.1/api/health" >/dev/null 2>&1; then
+    ok "HAProxy HTTP health OK on port 80"
+  else
+    warn "HAProxy HTTP health check failed on port 80."
+  fi
+
+  if is_real_domain "$DOMAIN"; then
+    dns_records="$(resolve_domain_records "$DOMAIN")"
+    if [ -n "$dns_records" ]; then
+      info "DNS for $DOMAIN resolves to: $dns_records"
+    else
+      warn "DNS lookup failed for $DOMAIN."
+    fi
+
+    if curl -fsS --max-time 8 "http://${DOMAIN}/api/health" >/dev/null 2>&1; then
+      ok "Public HTTP health OK: http://${DOMAIN}/api/health"
+    else
+      warn "Public HTTP health check failed for $DOMAIN. Check DNS, cloud firewall, and provider firewall rules."
+    fi
+
+    if [ "$HTTPS_BIND_LINE" != "# HTTPS disabled until a valid certificate is installed" ]; then
+      if curl -kfsS --max-time 8 "https://${DOMAIN}/api/health" >/dev/null 2>&1; then
+        ok "Public HTTPS health OK: https://${DOMAIN}/api/health"
+      else
+        warn "Public HTTPS health check failed for $DOMAIN. Check HAProxy logs and port 443 firewall rules."
+      fi
+    else
+      warn "HTTPS is not enabled; use http://${DOMAIN} until certificate setup succeeds."
+    fi
+  fi
+}
+
 banner() {
   clear
   echo -e "${CYAN}${BOLD}"
@@ -151,6 +471,8 @@ step() {
   echo -e "${CYAN}${BOLD}━━━ $1 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
 }
 
+parse_args "$@"
+
 # ── Root check ────────────────────────────────────────────────────
 if [ "$EUID" -ne 0 ]; then
   echo -e "${RED}Please run as root: sudo bash sparrow-setup.sh${RESET}"
@@ -165,11 +487,10 @@ OS_ID=$(grep '^ID=' /etc/os-release | cut -d= -f2 | tr -d '"')
 OS_VER=$(grep '^VERSION_ID=' /etc/os-release | cut -d= -f2 | tr -d '"')
 KERNEL=$(uname -r)
 ARCH=$(uname -m)
-IFACE=$(ip -4 route show default 2>/dev/null | awk '{print $5}' | head -1)
-if [ -z "$IFACE" ]; then
-  IFACE=$(ip -6 route show default 2>/dev/null | awk '{print $5}' | head -1)
-fi
-SERVER_IP=$(curl -s ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
+IFACE="$(detect_default_interface)"
+SERVER_IPV4="$(detect_public_ipv4 || true)"
+SERVER_IPV6="$(detect_public_ipv6 || true)"
+SERVER_IP="${SERVER_IPV4:-$SERVER_IPV6}"
 RAM_GB=$(awk '/MemTotal/ {printf "%.0f", $2/1024/1024}' /proc/meminfo)
 CPU_CORES=$(nproc)
 KERNEL_MAJOR=$(echo "$KERNEL" | cut -d. -f1)
@@ -181,7 +502,12 @@ if [ -z "$IFACE" ]; then
   err "Could not detect the default network interface"
   exit 1
 fi
-ok "Interface: $IFACE | IP: $SERVER_IP"
+ok "Interface: $IFACE"
+if [ -n "$SERVER_IPV4" ]; then ok "Public IPv4: $SERVER_IPV4"; else info "No public IPv4 detected"; fi
+if [ -n "$SERVER_IPV6" ]; then ok "Public IPv6: $SERVER_IPV6"; else info "No public IPv6 detected"; fi
+if [ -n "$SERVER_IPV6" ]; then
+  HTTP_BIND_LINE="bind :::80 v4v6"
+fi
 ok "Resources: ${CPU_CORES} cores / ${RAM_GB}GB RAM"
 
 # XDP support check (kernel >= 5.6)
@@ -189,19 +515,44 @@ XDP_SUPPORTED=false
 if [ "$KERNEL_MAJOR" -gt 5 ] || { [ "$KERNEL_MAJOR" -eq 5 ] && [ "$KERNEL_MINOR" -ge 6 ]; }; then
   XDP_SUPPORTED=true
   ok "XDP/eBPF: Supported"
+  if [ -z "$SERVER_IPV4" ] && [ -n "$SERVER_IPV6" ]; then
+    warn "XDP program currently filters IPv4 traffic; IPv6 traffic remains protected by nftables and HAProxy."
+  fi
 else
   warn "XDP/eBPF: NOT supported (kernel $KERNEL below 5.6)"
 fi
 
 # ── Gather Config ─────────────────────────────────────────────────
 step "Configuration Questions"
-echo -e "${DIM}Press Enter to accept the default value shown in [brackets]${RESET}"
-echo ""
+if [ "$AUTO_MODE" = true ]; then
+  [ -z "$DOMAIN" ] && DOMAIN="$(detect_domain_default)"
+  info "Auto mode enabled; using detected/default configuration."
+else
+  echo -e "${DIM}Press Enter to accept the default value shown in [brackets]${RESET}"
+  echo ""
+  askd "Panel domain (e.g. panel.sparrowx.net):"    DOMAIN         "${DOMAIN:-$(detect_domain_default)}"
+  askd "Panel port:"                                 PANEL_PORT     "${PANEL_PORT:-3001}"
+  askd "Discord webhook URL (for alerts):"           DISCORD_URL    "${DISCORD_URL:-}"
+  askd "Admin email:"                                ADMIN_EMAIL    "${ADMIN_EMAIL:-admin@localhost}"
+fi
 
-askd "Panel domain (e.g. panel.sparrowx.net):"    DOMAIN         "localhost"
-askd "Panel port:"                                 PANEL_PORT     "3001"
-askd "Discord webhook URL (for alerts):"           DISCORD_URL    ""
-askd "Admin email:"                                ADMIN_EMAIL    "admin@localhost"
+normalize_runtime_config
+ok "Panel domain: $DOMAIN"
+ok "Panel port: $PANEL_PORT"
+ok "Admin email: $ADMIN_EMAIL"
+if is_real_domain "$DOMAIN"; then
+  if [ -n "$DNS_RECORDS" ]; then
+    info "DNS records detected for $DOMAIN: $DNS_RECORDS"
+  else
+    info "No DNS records detected for $DOMAIN yet."
+  fi
+
+  if [ "$DNS_MATCHES_SERVER" = true ]; then
+    ok "Domain DNS points to this VPS"
+  else
+    info "Domain DNS will be rechecked after dependencies are installed."
+  fi
+fi
 
 echo ""
 info "Starting automated deployment..."
@@ -227,6 +578,17 @@ if ! apt_install_if_available "Matching kernel headers" "linux-headers-$(uname -
 fi
 
 install_bpftool || true
+
+# Re-detect after curl/iproute dependencies are guaranteed to exist.
+SERVER_IPV4="$(detect_public_ipv4 || true)"
+SERVER_IPV6="$(detect_public_ipv6 || true)"
+if [ -n "$SERVER_IPV6" ]; then
+  HTTP_BIND_LINE="bind :::80 v4v6"
+else
+  HTTP_BIND_LINE="bind *:80"
+fi
+normalize_runtime_config
+info "Confirmed network profile: IPv4=${SERVER_IPV4:-none}, IPv6=${SERVER_IPV6:-none}, DNS=${DNS_RECORDS:-none}"
 
 # Node.js
 if ! command -v node &>/dev/null; then
@@ -323,6 +685,10 @@ SUPABASE_URL=${SUPABASE_URL}
 SUPABASE_ANON_KEY=${SUPABASE_ANON}
 SUPABASE_SERVICE_KEY=${SUPABASE_SVC}
 SPARROWX_DOMAIN=${DOMAIN}
+SPARROWX_INTERFACE=${IFACE}
+SPARROWX_PUBLIC_IPV4=${SERVER_IPV4}
+SPARROWX_PUBLIC_IPV6=${SERVER_IPV6}
+SPARROWX_DNS_RECORDS=${DNS_RECORDS}
 PORT=${PANEL_PORT}
 ADMIN_EMAIL=${ADMIN_EMAIL}
 DISCORD_WEBHOOK_URL=${DISCORD_URL}
@@ -330,10 +696,34 @@ NODE_ENV=production
 EOF
 ok ".env file written"
 
+install -d -m 0755 /etc/sparrowx
+cat > /etc/sparrowx/install-profile.env <<EOF
+# Auto-generated by sparrow-setup.sh on $(date)
+SPARROWX_INSTALL_DIR="${SCRIPT_DIR}"
+SPARROWX_OS="${OS_ID}"
+SPARROWX_OS_VERSION="${OS_VER}"
+SPARROWX_KERNEL="${KERNEL}"
+SPARROWX_ARCH="${ARCH}"
+SPARROWX_INTERFACE="${IFACE}"
+SPARROWX_PUBLIC_IPV4="${SERVER_IPV4}"
+SPARROWX_PUBLIC_IPV6="${SERVER_IPV6}"
+SPARROWX_DOMAIN="${DOMAIN}"
+SPARROWX_PANEL_PORT="${PANEL_PORT}"
+SPARROWX_DNS_RECORDS="${DNS_RECORDS}"
+SPARROWX_DNS_MATCHES_SERVER="${DNS_MATCHES_SERVER}"
+SPARROWX_HTTP_BIND="${HTTP_BIND_LINE}"
+SPARROWX_HTTPS_BIND="${HTTPS_BIND_LINE}"
+SPARROWX_ALLOWED_TCP_PORTS="${ALLOWED_TCP_PORTS}"
+EOF
+chmod 0644 /etc/sparrowx/install-profile.env
+ok "Install profile written to /etc/sparrowx/install-profile.env"
+
 # ── Layer 2: nftables ─────────────────────────────────────────────
 step "Layer 2: Setting Up nftables"
 if [ -f "$SCRIPT_DIR/configs/nftables-sparrowx.conf" ]; then
-  sed "s/IFACE_PLACEHOLDER/$IFACE/g" "$SCRIPT_DIR/configs/nftables-sparrowx.conf" > /etc/nftables.conf.sparrowx
+  sed -e "s/IFACE_PLACEHOLDER/$IFACE/g" \
+      -e "s/ALLOWED_TCP_PORTS_PLACEHOLDER/$ALLOWED_TCP_PORTS/g" \
+      "$SCRIPT_DIR/configs/nftables-sparrowx.conf" > /etc/nftables.conf.sparrowx
   # Non-destructive include
   if ! grep -q "nftables.conf.sparrowx" /etc/nftables.conf; then
      echo "include \"/etc/nftables.conf.sparrowx\"" >> /etc/nftables.conf
@@ -354,7 +744,11 @@ fi
 step "Layer 3: HAProxy WAF"
 mkdir -p /etc/haproxy/certs
 if [ -f "$SCRIPT_DIR/configs/haproxy.cfg" ]; then
-  sed "s/PANEL_PORT_PLACEHOLDER/$PANEL_PORT/g" "$SCRIPT_DIR/configs/haproxy.cfg" > /etc/haproxy/haproxy.cfg
+  configure_haproxy_tls || true
+  sed -e "s/PANEL_PORT_PLACEHOLDER/$PANEL_PORT/g" \
+      -e "s|HTTP_BIND_PLACEHOLDER|$HTTP_BIND_LINE|g" \
+      -e "s|HTTPS_BIND_PLACEHOLDER|$HTTPS_BIND_LINE|g" \
+      "$SCRIPT_DIR/configs/haproxy.cfg" > /etc/haproxy/haproxy.cfg
   if ! command -v haproxy >/dev/null 2>&1 || ! systemd_unit_exists haproxy.service; then
     warn "HAProxy package or service is missing; skipping HAProxy startup."
   elif ! haproxy -c -f /etc/haproxy/haproxy.cfg >> "$LOG_FILE" 2>&1; then
@@ -444,6 +838,8 @@ fi
 CRON_WATCHDOG="*/5 * * * * root bash $SCRIPT_DIR/sbs-watchdog.sh >> /var/log/sbs/watchdog.log 2>&1"
 echo "$CRON_WATCHDOG" > /etc/cron.d/sparrowx-watchdog
 ok "Watchdog cron job scheduled"
+
+run_deployment_health_checks
 
 # ── Results ───────────────────────────────────────────────────────
 step "Setup Complete!"
