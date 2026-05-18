@@ -42,8 +42,6 @@ export default function Layout({ user, setToken }) {
     { path: '/install', name: 'Install Agent', icon: <Download size={18} />, caption: 'Generate the installer and deploy to a server' },
     { path: '/apikeys', name: 'API & Keys', icon: <Key size={18} />, caption: 'Manage agent credentials and API access' },
     { path: '/settings', name: 'Settings', icon: <Settings size={18} />, caption: 'Account details and network controls' },
-    { section: 'Support' },
-    { path: 'https://discord.gg/u3cQ3zwMgC', name: 'Discord', icon: <DiscordIcon size={18} />, caption: 'Join our community for support and updates', isExternal: true },
   ];
 
   const { isConnected, agentStatus, wsState, viewMode, setViewMode } = useTelemetry();
@@ -85,17 +83,6 @@ export default function Layout({ user, setToken }) {
           <div className="topbar-time">{time}</div>
           <div className="user-chip">@{user?.username} {user?.role === 'admin' && '(ADMIN)'}</div>
           
-          <a 
-            href="https://discord.gg/u3cQ3zwMgC" 
-            target="_blank" 
-            rel="noopener noreferrer"
-            className="icon-button secondary-button"
-            title="Join Discord"
-            style={{ color: '#fff' }}
-          >
-            <DiscordIcon size={16} />
-          </a>
-
           <button className="icon-button danger-outline" onClick={handleLogout} aria-label="Log out">
             <LogOut size={16} />
           </button>

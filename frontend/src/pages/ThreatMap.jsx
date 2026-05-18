@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { ComposableMap, Geographies, Geography, Marker, Line } from 'react-simple-maps';
 import { useTelemetry } from '../context/TelemetryContext';
 
-const geoUrl = "https://unpkg.com/world-atlas@2.0.2/countries-110m.json";
+const geoUrl = "/countries-110m.json";
 
 export default function ThreatMap({ token }) {
   const { viewMode } = useTelemetry();

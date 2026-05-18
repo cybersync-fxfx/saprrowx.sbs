@@ -10,13 +10,7 @@ source "$SCRIPT_DIR/.env" 2>/dev/null
 LOG_FILE="/var/log/sbs/watchdog.log"
 mkdir -p /var/log/sbs
 
-# ── Discord Helper ───────────────────────────────────────────────
-send_discord() {
-  local msg="$1"
-  if [ -n "${DISCORD_WEBHOOK_URL:-}" ]; then
-    curl -H "Content-Type: application/json" -X POST -d "{\"content\": \"$msg\"}" "$DISCORD_WEBHOOK_URL" >/dev/null 2>&1
-  fi
-}
+
 
 # ── Checks ────────────────────────────────────────────────────────
 echo "[$(date)] Watchdog running..." >> "$LOG_FILE"
@@ -62,7 +56,7 @@ if [ ${#ERRORS[@]} -gt 0 ]; then
     echo "[!] $err" >> "$LOG_FILE"
   done
   MSG="$MSG\n🛠️ *Watchdog attempted automated recovery.*"
-  send_discord "$MSG"
+  # Alert handled via internal logs
 else
   echo "[✓] All systems green" >> "$LOG_FILE"
 fi

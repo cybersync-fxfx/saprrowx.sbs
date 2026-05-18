@@ -9,7 +9,7 @@ export default function Docs() {
   const [typedCommand, setTypedCommand] = useState('');
   const [showOutput, setShowOutput] = useState(false);
 
-  const fullCommand = 'curl -sSL https://sparrowx.sbs/install.sh | bash';
+  const fullCommand = 'Download the installer from the Install tab and run it locally: sudo bash sparrowx-agent.sh';
 
   useEffect(() => {
     let i = 0;
@@ -158,7 +158,7 @@ export default function Docs() {
             <div className="info-grid">
               <div className="info-card">
                 <h4>SPARROWX_SERVER</h4>
-                <p>The dashboard URL routing data streams (default: <code>https://sparrowx.sbs</code>).</p>
+                <p>The dashboard URL routing data streams (default: <code>http://your-vps-ip:3001</code>).</p>
               </div>
               <div className="info-card">
                 <h4>SPARROWX_API_KEY</h4>

@@ -79,9 +79,6 @@ echo ""
 
 askd "Panel domain (e.g. panel.sparrowx.net):"    DOMAIN         "localhost"
 askd "Panel port:"                                 PANEL_PORT     "3001"
-askd "Supabase URL:"                               SUPABASE_URL   ""
-askd "Supabase Anon Key:"                          SUPABASE_ANON  ""
-askd "Supabase Service Key:"                       SUPABASE_SVC   ""
 askd "Discord webhook URL (for alerts):"           DISCORD_URL    ""
 askd "Admin email:"                                ADMIN_EMAIL    "admin@localhost"
 
@@ -111,6 +108,63 @@ if ! command -v pm2 &>/dev/null; then
   npm install -g pm2 --silent
 fi
 ok "PM2 installed"
+
+# ── Local Supabase Database Setup ─────────────────────────────────
+step "Local Supabase Database Setup"
+if ! command -v docker &>/dev/null; then
+  info "Installing Docker..."
+  curl -fsSL https://get.docker.com | sh >> "$LOG_FILE" 2>&1
+  systemctl enable --now docker >> "$LOG_FILE" 2>&1
+fi
+
+if [ ! -d "/opt/supabase" ]; then
+  info "Cloning Supabase locally..."
+  git clone --depth 1 https://github.com/supabase/supabase /opt/supabase-source >> "$LOG_FILE" 2>&1
+  mkdir -p /opt/supabase
+  cp -rf /opt/supabase-source/docker/* /opt/supabase/
+  cp /opt/supabase-source/docker/.env.example /opt/supabase/.env
+  
+  cd /opt/supabase
+  # Update ports to bind to localhost
+  sed -i 's/KONG_HTTP_PORT=8000/KONG_HTTP_PORT=127.0.0.1:8000/g' .env
+  sed -i 's/KONG_HTTPS_PORT=8443/KONG_HTTPS_PORT=127.0.0.1:8443/g' .env
+  sed -i 's/POSTGRES_PORT=5432/POSTGRES_PORT=127.0.0.1:5432/g' .env
+  sed -i 's/POOLER_PROXY_PORT_TRANSACTION=6543/POOLER_PROXY_PORT_TRANSACTION=127.0.0.1:6543/g' .env
+  
+  info "Configuring secrets..."
+  DB_PASS=$(openssl rand -hex 16)
+  JWT_SECRET=$(openssl rand -hex 32)
+  sed -i "s/POSTGRES_PASSWORD=your-super-secret-and-long-postgres-password/POSTGRES_PASSWORD=$DB_PASS/g" .env
+  sed -i "s/JWT_SECRET=your-super-secret-jwt-token-with-at-least-32-characters-long/JWT_SECRET=$JWT_SECRET/g" .env
+  
+  if [ -f "./utils/generate-keys.sh" ]; then
+    bash ./utils/generate-keys.sh >> "$LOG_FILE" 2>&1 || true
+  fi
+  
+  info "Starting local Supabase (this will take a few minutes)..."
+  docker compose pull >> "$LOG_FILE" 2>&1
+  docker compose up -d >> "$LOG_FILE" 2>&1
+  
+  info "Waiting for database to initialize..."
+  sleep 45
+  
+  info "Applying SparrowX database schema..."
+  docker compose exec -T db psql -U postgres -d postgres < "$SCRIPT_DIR/supabase_setup.sql" >> "$LOG_FILE" 2>&1
+  docker compose exec -T db psql -U postgres -d postgres < "$SCRIPT_DIR/supabase_threat_radar.sql" >> "$LOG_FILE" 2>&1
+  ok "Local Supabase setup completed successfully"
+else
+  ok "Local Supabase is already installed in /opt/supabase"
+fi
+
+cd /opt/supabase
+SUPABASE_URL="http://127.0.0.1:8000"
+SUPABASE_ANON=$(grep -E "^ANON_KEY=" .env | cut -d '=' -f2 | tr -d '"\r' | tail -n 1)
+SUPABASE_SVC=$(grep -E "^SERVICE_ROLE_KEY=" .env | cut -d '=' -f2 | tr -d '"\r' | tail -n 1)
+cd "$SCRIPT_DIR"
+
+if [ -z "$SUPABASE_ANON" ] || [ -z "$SUPABASE_SVC" ]; then
+  warn "Failed to extract Supabase keys, check /opt/supabase/.env!"
+fi
 
 # ── Write .env ────────────────────────────────────────────────────
 step "Configuring Environment"

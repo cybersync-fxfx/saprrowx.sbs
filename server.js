@@ -72,39 +72,15 @@ setInterval(() => {
 const lastAttackAlertSentAt = {};
 
 const DISCORD_WEBHOOKS = {
-  blockBan: process.env.DISCORD_WEBHOOK_BLOCK_BAN || 'https://discord.com/api/webhooks/1499017546836476015/jmRXGwbDjn29v-jexmhIB2EoASy2DKztnsDDcjPh2As4fUYp6beZvT4vPXi6CvyoOmnc',
-  attack: process.env.DISCORD_WEBHOOK_ATTACK || 'https://discord.com/api/webhooks/1499017771911217304/vgAvLNMV9UoFpWy95t0d8HQDwDe7HlwUswtFVKXVECV0aF6lCu1Rx6pYGK7aKLJGSWi8',
-  newClient: process.env.DISCORD_WEBHOOK_NEW_CLIENT || 'https://discord.com/api/webhooks/1499017771911217304/vgAvLNMV9UoFpWy95t0d8HQDwDe7HlwUswtFVKXVECV0aF6lCu1Rx6pYGK7aKLJGSWi8',
-  info: process.env.DISCORD_WEBHOOK_INFO || 'https://discord.com/api/webhooks/1499018562688258162/LVVH6V2euBv0YB0fNwFD5cU75haNe4wFUMU5m79d7rBhcr8NxUzNrybrLCSh4ZV5t79V'
+  blockBan: process.env.DISCORD_WEBHOOK_BLOCK_BAN || '',
+  attack: process.env.DISCORD_WEBHOOK_ATTACK || '',
+  newClient: process.env.DISCORD_WEBHOOK_NEW_CLIENT || '',
+  info: process.env.DISCORD_WEBHOOK_INFO || ''
 };
 
 function sendDiscordWebhook(type, payload) {
-  const url = DISCORD_WEBHOOKS[type];
-  if (!url) return;
-
-  const https = require('https');
-  const data = JSON.stringify(payload);
-
-  const req = https.request(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Content-Length': Buffer.byteLength(data)
-    }
-  }, (res) => {
-    res.on('data', () => {});
-  });
-
-  req.on('error', (e) => {
-    console.error(`[discord-webhook] Failed to send to ${type}:`, e.message);
-  });
-
-  req.on('timeout', () => {
-    req.destroy();
-  });
-
-  req.write(data);
-  req.end();
+  // Webhooks disabled for complete local isolation
+  return;
 }
 
 function parseEndpoint(value) {
@@ -810,7 +786,7 @@ const resolveGuardPublicIp = (req) => {
   if (ipv4Pattern.test(host)) return host;
 
   try {
-    return assertValidIpv4(execSync('curl -4 -fsS https://api.ipify.org').toString().trim());
+    return assertValidIpv4(execSync('hostname -I | awk \'{print $1}\'').toString().trim());
   } catch (err) {
     throw new Error('Unable to determine guard public IP. Set GUARD_PUBLIC_IP in the server environment.');
   }

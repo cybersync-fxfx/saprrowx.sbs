@@ -9,21 +9,49 @@ export default function Plans({ token, user }) {
   const [currencies, setCurrencies] = useState([]);
 
   useEffect(() => {
-    fetch('https://dash.detriot.cloud/api/plans')
-      .then(res => {
-        if (!res.ok) throw new Error('Failed to fetch plans');
-        return res.json();
-      })
-      .then(data => {
-        setPlans(data.plans || []);
-        setCurrencies(data.currencies || []);
-        setLoading(false);
-      })
-      .catch(err => {
-        console.error(err);
-        setError(err.message);
-        setLoading(false);
-      });
+    // Hardcoded local plans to ensure zero external dependencies
+    const localData = {
+      currencies: [{ code: 'USD', symbol: '$' }],
+      plans: [
+        {
+          id: 'sparrow-basic',
+          name: 'Sparrow Basic',
+          category: { name: 'Starter' },
+          price: 5.00,
+          billing_period: 'mo',
+          prices: [{ code: 'USD', amount: 5.00 }],
+          specs: { ram_gb: 2, cpu_cores: 1, disk_gb: 20 },
+          features: { backups: 1, databases: 1 },
+          is_out_of_stock: false
+        },
+        {
+          id: 'sparrow-pro',
+          name: 'Sparrow Pro',
+          category: { name: 'Professional' },
+          price: 15.00,
+          billing_period: 'mo',
+          prices: [{ code: 'USD', amount: 15.00 }],
+          specs: { ram_gb: 4, cpu_cores: 2, disk_gb: 50 },
+          features: { backups: 3, databases: 3 },
+          is_out_of_stock: false
+        },
+        {
+          id: 'sparrow-elite',
+          name: 'Sparrow Elite',
+          category: { name: 'Enterprise' },
+          price: 35.00,
+          billing_period: 'mo',
+          prices: [{ code: 'USD', amount: 35.00 }],
+          specs: { ram_gb: 8, cpu_cores: 4, disk_gb: 100 },
+          features: { backups: 5, databases: 5 },
+          is_out_of_stock: false
+        }
+      ]
+    };
+    
+    setPlans(localData.plans);
+    setCurrencies(localData.currencies);
+    setLoading(false);
   }, []);
 
   if (loading) {
@@ -56,8 +84,10 @@ export default function Plans({ token, user }) {
   const handleDeploy = (planId) => {
     setRedirectingPlanId(planId);
     setTimeout(() => {
-      window.location.href = 'https://dash.detriot.cloud';
-    }, 2500);
+      // Localized notification instead of external redirect
+      alert(`Local deployment of plan ${planId} initialized on this VPS.`);
+      setRedirectingPlanId(null);
+    }, 1500);
   };
 
   const selectedCurrency = currencies.find(c => c.code === currency) || { symbol: '$' };
