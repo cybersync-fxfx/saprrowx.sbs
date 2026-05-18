@@ -2,6 +2,7 @@
 #include <linux/if_ether.h>
 #include <linux/ip.h>
 #include <linux/in.h>
+#include <bpf/bpf_endian.h>
 #include <bpf/bpf_helpers.h>
 
 /* Map for blacklisted IPs */
@@ -21,7 +22,7 @@ int xdp_sparrowx_filter(struct xdp_md *ctx) {
     if ((void *)(eth + 1) > data_end)
         return XDP_PASS;
 
-    if (eth->h_proto != __constant_htons(ETH_P_IP))
+    if (eth->h_proto != bpf_htons(ETH_P_IP))
         return XDP_PASS;
 
     struct iphdr *iph = (void *)(eth + 1);

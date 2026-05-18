@@ -6,21 +6,135 @@
 #  Usage: sudo bash sparrow-setup.sh
 # =================================================================
 set -u
+set -o pipefail
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'
 CYAN='\033[0;36m'; BOLD='\033[1m'; DIM='\033[2m'; RESET='\033[0m'
 
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 LOG_FILE="$SCRIPT_DIR/setup.log"
+declare -a WARNINGS=()
 
 # ── Helpers ───────────────────────────────────────────────────────
 log()  { echo -e "$1" | tee -a "$LOG_FILE"; }
 ok()   { log "${GREEN}[✓] $1${RESET}"; }
 info() { log "${CYAN}[→] $1${RESET}"; }
-warn() { log "${YELLOW}[!] $1${RESET}"; }
+warn() { WARNINGS+=("$1"); log "${YELLOW}[!] $1${RESET}"; }
 err()  { log "${RED}[✗] $1${RESET}"; }
 ask()  { echo -ne "${BOLD}$1${RESET} "; read -r "$2"; }
 askd() { echo -ne "${BOLD}$1${RESET} ${DIM}[${3}]${RESET} "; read -r "$2"; eval "$2=\${$2:-$3}"; }
+
+apt_install_required() {
+  local label="$1"
+  shift
+
+  if DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "$@" >> "$LOG_FILE" 2>&1; then
+    ok "$label installed"
+    return 0
+  fi
+
+  err "$label install failed. Last package-manager output:"
+  tail -n 30 "$LOG_FILE" | sed 's/^/    /'
+  exit 1
+}
+
+apt_install_if_available() {
+  local label="$1"
+  shift
+  local package
+
+  for package in "$@"; do
+    if ! apt-cache show "$package" >/dev/null 2>&1; then
+      return 2
+    fi
+  done
+
+  if DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "$@" >> "$LOG_FILE" 2>&1; then
+    ok "$label installed"
+    return 0
+  fi
+
+  return 1
+}
+
+link_linux_tools_bpftool() {
+  local bpftool_path
+  bpftool_path="$(find /usr/lib/linux-tools -type f -name bpftool 2>/dev/null | sort -V | tail -n 1 || true)"
+
+  if [ -n "$bpftool_path" ]; then
+    ln -sf "$bpftool_path" /usr/local/sbin/bpftool
+    hash -r
+  fi
+}
+
+install_bpftool() {
+  if command -v bpftool >/dev/null 2>&1; then
+    ok "bpftool available"
+    return 0
+  fi
+
+  if apt_install_if_available "bpftool" bpftool; then
+    return 0
+  fi
+
+  if apt_install_if_available "kernel bpftool tools" "linux-tools-$(uname -r)" linux-tools-common; then
+    link_linux_tools_bpftool
+  fi
+
+  if ! command -v bpftool >/dev/null 2>&1 && apt_install_if_available "generic kernel bpftool tools" linux-tools-generic linux-tools-common; then
+    link_linux_tools_bpftool
+  fi
+
+  if command -v bpftool >/dev/null 2>&1; then
+    ok "bpftool available"
+    return 0
+  fi
+
+  warn "bpftool is not available from the enabled apt repositories; XDP blacklist sync will be skipped until bpftool is installed."
+  return 1
+}
+
+systemd_unit_exists() {
+  systemctl cat "$1" >/dev/null 2>&1
+}
+
+ensure_installer_permissions() {
+  local script
+  local executable_scripts=(
+    "$SCRIPT_DIR/sparrow.sh"
+    "$SCRIPT_DIR/sbs-admin.sh"
+    "$SCRIPT_DIR/sbs-cli.sh"
+    "$SCRIPT_DIR/sbs-disk-manager.sh"
+    "$SCRIPT_DIR/sbs-inspector.sh"
+    "$SCRIPT_DIR/sbs-update.sh"
+    "$SCRIPT_DIR/sbs-watchdog.sh"
+    "$SCRIPT_DIR/setup-guard.sh"
+    "$SCRIPT_DIR/harden-guard.sh"
+    "$SCRIPT_DIR/audit-infra.sh"
+    "$SCRIPT_DIR/tunnel-manager.sh"
+    "$SCRIPT_DIR/repair-tunnels.sh"
+    "$SCRIPT_DIR/restore-tunnels.sh"
+    "$SCRIPT_DIR/sparrow-apply-config.sh"
+    "$SCRIPT_DIR/sparrow-attack-test.sh"
+    "$SCRIPT_DIR/sparrow-healthfix.sh"
+    "$SCRIPT_DIR/sparrow-setup.sh"
+    "$SCRIPT_DIR/xdp/load_xdp.sh"
+    "$SCRIPT_DIR/xdp/sync_blocklist.sh"
+    "$SCRIPT_DIR/configs/fastnetmon-notify.sh"
+  )
+
+  mkdir -p /usr/local/bin /usr/local/sbin /var/log/sbs
+  chmod 0755 /usr/local/bin /usr/local/sbin /var/log/sbs
+
+  for script in "${executable_scripts[@]}"; do
+    if [ -f "$script" ]; then
+      chmod 0755 "$script"
+    fi
+  done
+
+  find "$SCRIPT_DIR" -maxdepth 2 -type d -exec chmod 0755 {} \; 2>/dev/null || true
+  ok "Command permissions normalized"
+}
 
 banner() {
   clear
@@ -51,7 +165,10 @@ OS_ID=$(grep '^ID=' /etc/os-release | cut -d= -f2 | tr -d '"')
 OS_VER=$(grep '^VERSION_ID=' /etc/os-release | cut -d= -f2 | tr -d '"')
 KERNEL=$(uname -r)
 ARCH=$(uname -m)
-IFACE=$(ip route | grep default | awk '{print $5}' | head -1)
+IFACE=$(ip -4 route show default 2>/dev/null | awk '{print $5}' | head -1)
+if [ -z "$IFACE" ]; then
+  IFACE=$(ip -6 route show default 2>/dev/null | awk '{print $5}' | head -1)
+fi
 SERVER_IP=$(curl -s ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
 RAM_GB=$(awk '/MemTotal/ {printf "%.0f", $2/1024/1024}' /proc/meminfo)
 CPU_CORES=$(nproc)
@@ -60,6 +177,10 @@ KERNEL_MINOR=$(echo "$KERNEL" | cut -d. -f2)
 
 ok "OS: $OS_ID $OS_VER"
 ok "Kernel: $KERNEL"
+if [ -z "$IFACE" ]; then
+  err "Could not detect the default network interface"
+  exit 1
+fi
 ok "Interface: $IFACE | IP: $SERVER_IP"
 ok "Resources: ${CPU_CORES} cores / ${RAM_GB}GB RAM"
 
@@ -86,26 +207,47 @@ echo ""
 info "Starting automated deployment..."
 sleep 1
 
+ensure_installer_permissions
+
 # ── System Update & Base Packages ────────────────────────────────
 step "Installing Dependencies"
-apt-get update -qq | tee -a "$LOG_FILE"
-apt-get install -y -qq \
-  curl wget git unzip jq net-tools \
+if ! apt-get update -qq >> "$LOG_FILE" 2>&1; then
+  err "apt update failed. Last package-manager output:"
+  tail -n 30 "$LOG_FILE" | sed 's/^/    /'
+  exit 1
+fi
+
+apt_install_required "Required system packages" \
+  ca-certificates curl wget git unzip jq net-tools iproute2 \
   nftables wireguard haproxy \
-  build-essential clang llvm libelf-dev libbpf-dev \
-  linux-headers-$(uname -r) bpftool | tee -a "$LOG_FILE"
-ok "System packages installed"
+  build-essential clang llvm libelf-dev libbpf-dev
+
+if ! apt_install_if_available "Matching kernel headers" "linux-headers-$(uname -r)"; then
+  warn "Matching headers for the running kernel ($(uname -r)) are unavailable. If XDP compilation fails, reboot into the latest installed kernel and rerun setup."
+fi
+
+install_bpftool || true
 
 # Node.js
 if ! command -v node &>/dev/null; then
-  curl -fsSL https://deb.nodesource.com/setup_20.x | bash - | tee -a "$LOG_FILE"
-  apt-get install -y nodejs | tee -a "$LOG_FILE"
+  if ! curl -fsSL https://deb.nodesource.com/setup_20.x | bash - >> "$LOG_FILE" 2>&1; then
+    err "NodeSource repository setup failed"
+    exit 1
+  fi
+  apt_install_required "Node.js" nodejs
+fi
+if ! command -v node &>/dev/null; then
+  err "Node.js command is still unavailable after installation"
+  exit 1
 fi
 ok "Node.js $(node -v)"
 
 # PM2
 if ! command -v pm2 &>/dev/null; then
-  npm install -g pm2 --silent
+  if ! npm install -g pm2 --silent >> "$LOG_FILE" 2>&1; then
+    err "PM2 install failed"
+    exit 1
+  fi
 fi
 ok "PM2 installed"
 
@@ -113,13 +255,20 @@ ok "PM2 installed"
 step "Local Supabase Database Setup"
 if ! command -v docker &>/dev/null; then
   info "Installing Docker..."
-  curl -fsSL https://get.docker.com | sh >> "$LOG_FILE" 2>&1
-  systemctl enable --now docker >> "$LOG_FILE" 2>&1
+  if ! curl -fsSL https://get.docker.com | sh >> "$LOG_FILE" 2>&1; then
+    err "Docker install failed"
+    exit 1
+  fi
+  if ! systemctl enable --now docker >> "$LOG_FILE" 2>&1; then
+    err "Docker service failed to start"
+    exit 1
+  fi
 fi
 
 if [ ! -d "/opt/supabase" ]; then
   info "Cloning Supabase locally..."
-  git clone --depth 1 https://github.com/supabase/supabase /opt/supabase-source >> "$LOG_FILE" 2>&1
+  rm -rf /opt/supabase-source
+  git clone --depth 1 https://github.com/supabase/supabase /opt/supabase-source >> "$LOG_FILE" 2>&1 || { err "Supabase clone failed"; exit 1; }
   mkdir -p /opt/supabase
   cp -rf /opt/supabase-source/docker/* /opt/supabase/
   cp /opt/supabase-source/docker/.env.example /opt/supabase/.env
@@ -142,15 +291,15 @@ if [ ! -d "/opt/supabase" ]; then
   fi
   
   info "Starting local Supabase (this will take a few minutes)..."
-  docker compose pull >> "$LOG_FILE" 2>&1
-  docker compose up -d >> "$LOG_FILE" 2>&1
+  docker compose pull >> "$LOG_FILE" 2>&1 || { err "Supabase Docker image pull failed"; exit 1; }
+  docker compose up -d >> "$LOG_FILE" 2>&1 || { err "Supabase Docker startup failed"; exit 1; }
   
   info "Waiting for database to initialize..."
   sleep 45
   
   info "Applying SparrowX database schema..."
-  docker compose exec -T db psql -U postgres -d postgres < "$SCRIPT_DIR/supabase_setup.sql" >> "$LOG_FILE" 2>&1
-  docker compose exec -T db psql -U postgres -d postgres < "$SCRIPT_DIR/supabase_threat_radar.sql" >> "$LOG_FILE" 2>&1
+  docker compose exec -T db psql -U postgres -d postgres < "$SCRIPT_DIR/supabase_setup.sql" >> "$LOG_FILE" 2>&1 || { err "Core database schema apply failed"; exit 1; }
+  docker compose exec -T db psql -U postgres -d postgres < "$SCRIPT_DIR/supabase_threat_radar.sql" >> "$LOG_FILE" 2>&1 || { err "Threat radar schema apply failed"; exit 1; }
   ok "Local Supabase setup completed successfully"
 else
   ok "Local Supabase is already installed in /opt/supabase"
@@ -206,54 +355,90 @@ step "Layer 3: HAProxy WAF"
 mkdir -p /etc/haproxy/certs
 if [ -f "$SCRIPT_DIR/configs/haproxy.cfg" ]; then
   sed "s/PANEL_PORT_PLACEHOLDER/$PANEL_PORT/g" "$SCRIPT_DIR/configs/haproxy.cfg" > /etc/haproxy/haproxy.cfg
-  systemctl enable haproxy
-  systemctl restart haproxy >> "$LOG_FILE" 2>&1 && ok "HAProxy running" || warn "HAProxy failed to start"
+  if ! command -v haproxy >/dev/null 2>&1 || ! systemd_unit_exists haproxy.service; then
+    warn "HAProxy package or service is missing; skipping HAProxy startup."
+  elif ! haproxy -c -f /etc/haproxy/haproxy.cfg >> "$LOG_FILE" 2>&1; then
+    warn "HAProxy config validation failed; check $LOG_FILE."
+  elif systemctl enable --now haproxy >> "$LOG_FILE" 2>&1; then
+    ok "HAProxy running"
+  else
+    warn "HAProxy failed to start; check $LOG_FILE."
+  fi
+else
+  warn "HAProxy config source missing"
 fi
 
 # ── Layer 4: FastNetMon ──────────────────────────────────────────
 step "Layer 4: FastNetMon Detection"
 if ! command -v fastnetmon &>/dev/null; then
-  wget -q https://install.fastnetmon.com/installer -O /tmp/fnm_install.sh
-  bash /tmp/fnm_install.sh --install-only >> "$LOG_FILE" 2>&1
+  if wget -q https://install.fastnetmon.com/installer -O /tmp/fnm_install.sh; then
+    bash /tmp/fnm_install.sh --install-only >> "$LOG_FILE" 2>&1 || warn "FastNetMon installer failed; check $LOG_FILE."
+  else
+    warn "FastNetMon installer download failed."
+  fi
 fi
 
 if [ -f "$SCRIPT_DIR/configs/fastnetmon.conf" ]; then
-  sed "s/IFACE_PLACEHOLDER/$IFACE/g" "$SCRIPT_DIR/configs/fastnetmon.conf" > /etc/fastnetmon.conf
-  cp "$SCRIPT_DIR/configs/fastnetmon-notify.sh" /usr/local/bin/fastnetmon-notify.sh
-  chmod +x /usr/local/bin/fastnetmon-notify.sh
-  systemctl enable fastnetmon
-  systemctl restart fastnetmon >> "$LOG_FILE" 2>&1 && ok "FastNetMon active" || warn "FastNetMon failed (Check logs)"
+  if ! command -v fastnetmon >/dev/null 2>&1 && ! systemd_unit_exists fastnetmon.service; then
+    warn "FastNetMon package or service is missing; skipping FastNetMon startup."
+  else
+    sed "s/IFACE_PLACEHOLDER/$IFACE/g" "$SCRIPT_DIR/configs/fastnetmon.conf" > /etc/fastnetmon.conf
+    install -m 0755 "$SCRIPT_DIR/configs/fastnetmon-notify.sh" /usr/local/bin/fastnetmon-notify.sh
+    if systemctl enable --now fastnetmon >> "$LOG_FILE" 2>&1; then
+      ok "FastNetMon active"
+    else
+      warn "FastNetMon failed to start; check $LOG_FILE."
+    fi
+  fi
+else
+  warn "FastNetMon config source missing"
 fi
 
 # ── Layer 1: XDP/eBPF ────────────────────────────────────────────
 if [ "$XDP_SUPPORTED" = true ]; then
   step "Layer 1: XDP Packet Filter"
-  cd "$SCRIPT_DIR/xdp"
-  # Compile with BTF support (-g)
-  clang -O2 -g -target bpf \
-    -D__TARGET_ARCH_$(uname -m | sed 's/x86_64/x86/') \
-    -I/usr/include/$(uname -m)-linux-gnu \
-    -c sparrowx_xdp.c -o sparrowx_xdp.o >> "$LOG_FILE" 2>&1
-  
-  if [ -f "sparrowx_xdp.o" ]; then
-    bash load_xdp.sh >> "$LOG_FILE" 2>&1 && ok "XDP attached to $IFACE" || warn "XDP load failed"
+  if ! command -v clang >/dev/null 2>&1; then
+    warn "clang is unavailable; skipping XDP compilation."
+  elif [ ! -d "$SCRIPT_DIR/xdp" ]; then
+    warn "XDP source directory missing"
   else
-    warn "XDP compilation failed"
+    cd "$SCRIPT_DIR/xdp"
+    rm -f sparrowx_xdp.o
+    # Compile with BTF support (-g)
+    if clang -O2 -g -target bpf \
+      -D__TARGET_ARCH_$(uname -m | sed 's/x86_64/x86/') \
+      -I/usr/include/$(uname -m)-linux-gnu \
+      -c sparrowx_xdp.c -o sparrowx_xdp.o >> "$LOG_FILE" 2>&1; then
+      bash load_xdp.sh >> "$LOG_FILE" 2>&1 && ok "XDP attached to $IFACE" || warn "XDP load failed; check $LOG_FILE."
+    else
+      warn "XDP compilation failed; check $LOG_FILE."
+    fi
+    cd "$SCRIPT_DIR"
   fi
-  cd "$SCRIPT_DIR"
 fi
 
 # ── Finalize Panel ────────────────────────────────────────────────
 step "Finalizing Panel"
-npm install --silent >> "$LOG_FILE" 2>&1
+if ! npm install --silent >> "$LOG_FILE" 2>&1; then
+  err "Panel dependency install failed"
+  exit 1
+fi
 pm2 delete sparrowx-panel 2>/dev/null || true
-pm2 start ecosystem.config.js >> "$LOG_FILE" 2>&1
-pm2 save >> "$LOG_FILE" 2>&1
+if ! pm2 start ecosystem.config.js >> "$LOG_FILE" 2>&1; then
+  err "PM2 failed to start SparrowX"
+  exit 1
+fi
+pm2 save >> "$LOG_FILE" 2>&1 || warn "PM2 save failed; SparrowX is running but may not restart automatically after reboot."
 ok "SparrowX services started"
 
 # CLI link
-ln -sf "$SCRIPT_DIR/sparrow.sh" /usr/local/bin/sparrow
-ok "Sparrow CLI installed"
+ensure_installer_permissions
+ln -sfn "$SCRIPT_DIR/sparrow.sh" /usr/local/bin/sparrow
+if [ -x /usr/local/bin/sparrow ]; then
+  ok "Sparrow CLI installed"
+else
+  warn "Sparrow CLI link was created but is not executable."
+fi
 
 # Watchdog
 CRON_WATCHDOG="*/5 * * * * root bash $SCRIPT_DIR/sbs-watchdog.sh >> /var/log/sbs/watchdog.log 2>&1"
@@ -262,6 +447,13 @@ ok "Watchdog cron job scheduled"
 
 # ── Results ───────────────────────────────────────────────────────
 step "Setup Complete!"
-echo -e "  ${GREEN}All layers have been configured and applied.${RESET}"
+if [ "${#WARNINGS[@]}" -eq 0 ]; then
+  echo -e "  ${GREEN}All layers have been configured and applied.${RESET}"
+else
+  echo -e "  ${YELLOW}Setup completed with ${#WARNINGS[@]} warning(s):${RESET}"
+  for warning in "${WARNINGS[@]}"; do
+    echo -e "  ${YELLOW}- ${warning}${RESET}"
+  done
+fi
 echo -e "  Run ${BOLD}sparrow${RESET} to manage your server."
 echo ""
